@@ -2,11 +2,13 @@ import type { ProviderName } from "../config/types.ts";
 import type { ModelPolicyResolver } from "../providers/model-policy-resolver.ts";
 import type { ProviderRegistry } from "../providers/provider-registry.ts";
 import type { LLMProvider } from "../providers/types.ts";
-import { interpretResearchIntent, shouldDelegateTask } from "./research-intent.ts";
+import { shouldDelegateTask } from "./research-intent.ts";
+import { IntentAgent } from "./intent-agent.ts";
 import type {
   AgentTaskResult,
   DelegationPlan,
   ExecutionObserver,
+  IntentAnalysis,
   ManagerExecutionResult,
   ResearchBudget,
   ResearchIntent,
@@ -36,7 +38,8 @@ function buildDirectPrompt(task: TaskRequest, intent: ResearchIntent): string {
     "Responde la tarea del usuario de forma breve, util y contextual.",
     "Si el mensaje actual depende de turnos anteriores, usa el historial reciente.",
     `Intento detectado: ${intent.type}`,
-    `Tarea: ${task.goal}`,
+    `Tarea original: ${task.goal}`,
+    task.resolvedGoal && task.resolvedGoal !== task.goal ? `Consulta refinada: ${task.resolvedGoal}` : "",
     buildConversationBlock(task)
   ]
     .filter(Boolean)
@@ -55,6 +58,7 @@ function buildDelegatedPrompt(task: TaskRequest, workerResult: AgentTaskResult, 
     "Si el mensaje actual depende de turnos anteriores, usa el historial reciente.",
     `Intento detectado: ${intent.type}`,
     `Objetivo original: ${task.goal}`,
+    task.resolvedGoal && task.resolvedGoal !== task.goal ? `Consulta refinada: ${task.resolvedGoal}` : "",
     buildConversationBlock(task),
     `Confianza del subagente: ${workerResult.confidence}`,
     `Resumen ejecutivo del subagente: ${workerResult.reasoningSummary}`,
@@ -133,14 +137,26 @@ function sanitizeAssistantText(text: string): string {
 }
 
 export class ManagerAgent {
+  private readonly intentAgent: IntentAgent;
+
   constructor(
     private readonly registry: ProviderRegistry,
     private readonly modelPolicy: ModelPolicyResolver,
-    private readonly workers: SubAgent[]
-  ) {}
+    private readonly workers: SubAgent[],
+    intentAgent?: IntentAgent
+  ) {
+    this.intentAgent = intentAgent ?? new IntentAgent();
+  }
 
   async run(task: TaskRequest, observer?: ExecutionObserver): Promise<ManagerExecutionResult> {
-    const intent = interpretResearchIntent(task.goal);
+    const analysis = this.intentAgent.analyze(task);
+    const preparedTask: TaskRequest = {
+      ...task,
+      resolvedGoal: analysis.resolvedGoal,
+      intentHint: analysis.intent.type,
+      intentAnalysis: analysis
+    };
+    const intent = analysis.intent;
 
     observer?.({
       scope: "manager",
@@ -151,6 +167,17 @@ export class ManagerAgent {
         detail: `intencion: ${intent.type} | entidad: ${intent.targetEntity}`
       }
     });
+    if (analysis.strippedTokens.length > 0 || analysis.resolvedGoal !== task.goal) {
+      observer?.({
+        scope: "manager",
+        kind: "status",
+        message: "Refinando la intencion del usuario.",
+        data: {
+          title: "pensando",
+          detail: `consulta limpia: ${analysis.resolvedGoal}`
+        }
+      });
+    }
     observer?.({
       scope: "manager",
       kind: "status",
@@ -162,11 +189,11 @@ export class ManagerAgent {
     });
 
     const selection = this.modelPolicy.resolve({
-      preferredProvider: task.preferredProvider,
-      preferredModel: task.preferredModel
+      preferredProvider: preparedTask.preferredProvider,
+      preferredModel: preparedTask.preferredModel
     });
     const provider = this.registry.createProvider(selection.provider);
-    const plan = this.createPlan(task, intent, selection.provider, selection.model, selection.fallbackUsed, selection.warnings);
+    const plan = this.createPlan(preparedTask, analysis, selection.provider, selection.model, selection.fallbackUsed, selection.warnings);
 
     observer?.({
       scope: "manager",
@@ -178,11 +205,11 @@ export class ManagerAgent {
       }
     });
 
-    const targetWorker = this.workers.find((worker) => worker.canHandle(task));
+    const targetWorker = this.workers.find((worker) => worker.canHandle(preparedTask));
 
     if (!plan.shouldDelegate || !targetWorker) {
       const text = await this.generateManagerResponse(provider, {
-        task,
+        task: preparedTask,
         plan,
         intent,
         observer
@@ -205,12 +232,12 @@ export class ManagerAgent {
       }
     });
 
-    const workerResult = await targetWorker.execute(task, plan, {
+    const workerResult = await targetWorker.execute(preparedTask, plan, {
       observer,
       provider
     });
     const text = await this.generateManagerResponse(provider, {
-      task,
+      task: preparedTask,
       plan,
       intent,
       workerResult,
@@ -227,13 +254,13 @@ export class ManagerAgent {
 
   private createPlan(
     task: TaskRequest,
-    intent: ResearchIntent,
+    analysis: IntentAnalysis,
     provider: ProviderName,
     model: string,
     fallbackUsed: boolean,
     warnings: string[]
   ): DelegationPlan {
-    const delegated = shouldDelegateTask(task.goal);
+    const delegated = shouldDelegateTask(task.resolvedGoal ?? task.goal);
     const targetWorker = this.workers.find((worker) => worker.canHandle(task));
 
     return {
@@ -247,9 +274,15 @@ export class ManagerAgent {
       model,
       fallbackUsed,
       warnings,
-      intentType: intent.type,
-      researchRequired: intent.researchRequired,
-      researchBudget: delegated ? DEFAULT_RESEARCH_BUDGET : undefined
+      intentType: analysis.intent.type,
+      researchRequired: analysis.intent.researchRequired,
+      researchBudget: delegated
+        ? {
+            ...DEFAULT_RESEARCH_BUDGET,
+            maxRounds: analysis.intent.type === "definition" ? 4 : DEFAULT_RESEARCH_BUDGET.maxRounds,
+            maxVisitedUrls: analysis.intent.type === "definition" ? 10 : DEFAULT_RESEARCH_BUDGET.maxVisitedUrls
+          }
+        : undefined
     };
   }
 

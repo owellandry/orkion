@@ -217,12 +217,63 @@ describe("WorkerAgent", () => {
 
     expect(result.status).toBe("success");
     expect(result.queriesTried.length).toBeGreaterThanOrEqual(2);
-    expect(result.visitedUrls).toContain("https://vinext.io/");
     expect(result.visitedUrls).toContain("https://github.com/openvitejs/vinext");
+    expect(result.visitedUrls.some((url) => url.includes("npmjs.com/package/vinext") || url.includes("vinext.io"))).toBe(true);
     expect(result.officialSourceFound).toBe(true);
     expect(result.confidence).toBe("high");
     expect(result.reasoningSummary).toContain("fuente oficial");
     expect(result.reasoningSummary).toContain("README");
     expect(result.reasoningSummary).toContain("npm");
+  });
+
+  test("uses the refined goal instead of slangy user wording", async () => {
+    const worker = new WorkerAgent(() =>
+      createFakeClient({
+        "fetchWebPage:https://www.npmjs.com/package/vinext": JSON.stringify({
+          url: "https://www.npmjs.com/package/vinext",
+          preview: "vinext package page with release metadata and install instructions."
+        }),
+        "fetchNpmPackageInfo:vinext": JSON.stringify({
+          packageName: "vinext",
+          description: "A Next.js-compatible runtime and framework surface built on Vite.",
+          latestVersion: "0.8.0",
+          homepage: "https://vinext.io/",
+          repositoryUrl: "https://github.com/openvitejs/vinext",
+          keywords: ["vite", "nextjs", "cloudflare"],
+          license: "MIT"
+        }),
+        "fetchWebPage:https://github.com/openvitejs/vinext": JSON.stringify({
+          url: "https://github.com/openvitejs/vinext",
+          preview: "GitHub repository for vinext."
+        }),
+        "fetchGitHubReadme:https://github.com/openvitejs/vinext": JSON.stringify({
+          repoUrl: "https://github.com/openvitejs/vinext",
+          readmeUrl: "https://raw.githubusercontent.com/openvitejs/vinext/refs/heads/main/README.md",
+          preview: "Vinext is a reimplementation of the Next.js API surface on top of Vite."
+        }),
+        "extractLinksFromPage:https://github.com/openvitejs/vinext": JSON.stringify({
+          url: "https://github.com/openvitejs/vinext",
+          links: []
+        }),
+        "formatReport:Lyra Research Report":
+          "# Lyra Research Report\n\nVinext is a reimplementation of the Next.js API surface on top of Vite."
+      })
+    );
+
+    const result = await worker.execute(
+      {
+        id: "task-slang",
+        goal: "que es vinext amigaso?",
+        resolvedGoal: "que es vinext"
+      },
+      plan,
+      {
+        provider: new FakeProvider()
+      }
+    );
+
+    expect(result.status).toBe("success");
+    expect(result.queriesTried.every((query) => !query.includes("amigaso"))).toBe(true);
+    expect(result.sources.some((source) => source.domain === "npmjs.com" || source.domain === "github.com")).toBe(true);
   });
 });

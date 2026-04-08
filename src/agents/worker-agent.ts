@@ -51,6 +51,15 @@ interface NpmPackageInfo {
   license?: string;
 }
 
+interface BrowserInspectResult {
+  url?: string;
+  title?: string;
+  metaDescription?: string;
+  headings?: string[];
+  preview?: string;
+  links?: ExtractedLinkItem[];
+}
+
 function preview(value: string): string {
   return value.length > 160 ? `${value.slice(0, 157)}...` : value;
 }
@@ -190,7 +199,10 @@ function parseSearchWebResult(rawText: string): SearchResultItem[] {
 
 function parseFetchPagePreview(rawText: string): string {
   const parsed = parseJsonSafely<{ preview?: string }>(rawText);
-  return parsed?.preview ?? rawText;
+  if (parsed) {
+    return parsed.preview ?? "";
+  }
+  return rawText;
 }
 
 function parseExtractedLinks(rawText: string): ExtractedLinkItem[] {
@@ -204,6 +216,10 @@ function parseGitHubReadme(rawText: string): GitHubReadmeResult {
 
 function parseNpmPackageInfo(rawText: string): NpmPackageInfo {
   return parseJsonSafely<NpmPackageInfo>(rawText) ?? {};
+}
+
+function parseBrowserInspectResult(rawText: string): BrowserInspectResult {
+  return parseJsonSafely<BrowserInspectResult>(rawText) ?? {};
 }
 
 function buildInitialQueries(intent: ResearchIntent): string[] {
@@ -300,9 +316,6 @@ function buildDirectUrlCandidates(intent: ResearchIntent): string[] {
   const slug = intent.targetEntity.toLowerCase().replace(/\s+/g, "-");
   const compact = intent.targetEntity.toLowerCase().replace(/\s+/g, "");
   const candidates: string[] = [
-    // Same-name org/repo is the most common GitHub pattern (e.g. openvite/openvite)
-    `https://github.com/${slug}/${slug}`,
-    `https://github.com/${slug}`,
     `https://www.npmjs.com/package/${slug}`,
     `https://www.npmjs.com/package/${compact}`,
     `https://jsr.io/@${slug}`,
@@ -310,7 +323,10 @@ function buildDirectUrlCandidates(intent: ResearchIntent): string[] {
     `https://${slug}.dev`,
     `https://${slug}.io`,
     `https://www.${slug}.dev`,
-    `https://www.${slug}.io`
+    `https://www.${slug}.io`,
+    // Same-name org/repo is a common GitHub pattern, but we try package/homepage first.
+    `https://github.com/${slug}/${slug}`,
+    `https://github.com/${slug}`
   ];
 
   for (const hint of intent.contextHints) {
@@ -405,6 +421,22 @@ function summarizeFindings(session: ResearchSession): string {
     .join("\n");
 }
 
+function shouldUseBrowserInspection(reason: string, source: ResearchSource, previewText: string): boolean {
+  if (source.domain.includes("github.com") || source.domain.includes("npmjs.com")) {
+    return false;
+  }
+
+  if (source.kind === "official" && !source.domain.includes("registry.npmjs.org")) {
+    return true;
+  }
+
+  if (/direct_|search_result|homepage|repository|linked_follow_up/i.test(reason)) {
+    return true;
+  }
+
+  return previewText.length < 500;
+}
+
 async function requestLlmReformulations(
   context: AgentExecutionContext | undefined,
   plan: DelegationPlan,
@@ -448,7 +480,8 @@ export class ResearchAgent implements SubAgent {
   async execute(task: TaskRequest, plan: DelegationPlan, context?: AgentExecutionContext): Promise<AgentTaskResult> {
     const client = this.clientFactory();
     const toolCalls: ToolCallRecord[] = [];
-    const intent = interpretResearchIntent(task.goal);
+    const executionGoal = task.resolvedGoal ?? task.goal;
+    const intent = task.intentAnalysis?.intent ?? interpretResearchIntent(executionGoal);
     const budget = plan.researchBudget ?? {
       maxRounds: 6,
       maxVisitedUrls: 16,
@@ -483,8 +516,18 @@ export class ResearchAgent implements SubAgent {
         detail: "mcp local listo para investigar web"
       });
       const tools = await client.listTools();
-      const expression = extractMathExpression(task.goal);
-      const directUrls = extractUrls(task.goal);
+      if (tools.includes("browserStatus")) {
+        const browserStatus = await client.callTool("browserStatus", {}).catch(() => undefined);
+        const browserData = browserStatus ? parseJsonSafely<{ available?: boolean; executable?: string }>(browserStatus.text) : undefined;
+        if (browserData?.available) {
+          emit(context, "mcp", "Navegador headless disponible para inspeccion profunda.", {
+            title: "preparando herramientas",
+            detail: `chrome mcp activo | ${shortText(browserData.executable ?? "browser")}`
+          });
+        }
+      }
+      const expression = extractMathExpression(executionGoal);
+      const directUrls = extractUrls(executionGoal);
       const queryQueue = [...buildInitialQueries(intent)];
       let emptySearchCount = 0;
 
@@ -587,15 +630,81 @@ export class ResearchAgent implements SubAgent {
 
         const pageResponse = await client.callTool("fetchWebPage", { url, maxChars: 3600 });
         toolCalls.push({ toolName: "fetchWebPage", arguments: { url, maxChars: 3600 }, resultPreview: preview(pageResponse.text) });
+        const pagePreview = parseFetchPagePreview(pageResponse.text);
 
         const source: ResearchSource = { url, domain: getDomain(url), kind: classifySourceKind(url, intent, title), title };
         addSource(source);
         session.evidence.push({
           query,
           source,
-          snippet: parseFetchPagePreview(pageResponse.text),
+          snippet: pagePreview,
           reason
         });
+
+        if (tools.includes("browserInspectPage") && shouldUseBrowserInspection(reason, source, pagePreview)) {
+          emit(context, "mcp", `Renderizando ${url} con navegador headless.`, {
+            title: "lyra esta investigando",
+            detail: `chrome mcp | ${getDomain(url)}`
+          });
+
+          const browserResponse = await client.callTool("browserInspectPage", { url, maxChars: 4200 }).catch(() => undefined);
+          if (browserResponse) {
+            toolCalls.push({ toolName: "browserInspectPage", arguments: { url, maxChars: 4200 }, resultPreview: preview(browserResponse.text) });
+            const browserData = parseBrowserInspectResult(browserResponse.text);
+            const browserSnippet = [
+              browserData.title ? `Titulo: ${browserData.title}.` : "",
+              browserData.metaDescription ? `Descripcion: ${browserData.metaDescription}` : "",
+              browserData.headings?.length ? `Secciones: ${browserData.headings.slice(0, 4).join(" | ")}.` : "",
+              browserData.preview ?? ""
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            if (browserSnippet.trim()) {
+              session.evidence.push({
+                query,
+                source: {
+                  ...source,
+                  title: browserData.title || source.title
+                },
+                snippet: browserSnippet,
+                reason: "browser_rendered"
+              });
+            }
+
+            if (tools.includes("browserExtractLinks") && browserData.links?.length) {
+              for (const link of browserData.links.slice(0, 4)) {
+                if (session.visitedUrls.length >= budget.maxVisitedUrls) break;
+                const shouldFollowRendered =
+                  classifySourceKind(link.url, intent, link.text) !== "other" ||
+                  /docs|readme|guide|get-started|quickstart|github|npm|package|api|reference|installation/i.test(
+                    `${link.text} ${link.url}`
+                  );
+
+                if (shouldFollowRendered) {
+                  await fetchAndCollect(link.url, `browser_follow_up:${link.text || "related"}`, query, link.text);
+                }
+              }
+            } else if (tools.includes("browserExtractLinks")) {
+              const browserLinksResponse = await client
+                .callTool("browserExtractLinks", {
+                  url,
+                  maxLinks: 8,
+                  keywords: ["docs", "documentation", "guide", "api", "github", "npm", "package", "readme", "reference"]
+                })
+                .catch(() => undefined);
+
+              if (browserLinksResponse) {
+                toolCalls.push({ toolName: "browserExtractLinks", arguments: { url, maxLinks: 8 }, resultPreview: preview(browserLinksResponse.text) });
+                const browserLinks = parseExtractedLinks(browserLinksResponse.text);
+                for (const link of browserLinks.slice(0, 4)) {
+                  if (session.visitedUrls.length >= budget.maxVisitedUrls) break;
+                  await fetchAndCollect(link.url, `browser_follow_up:${link.text || "related"}`, query, link.text);
+                }
+              }
+            }
+          }
+        }
 
         const repoUrl = extractGitHubRepoUrl(url);
         if (repoUrl) {
@@ -674,7 +783,7 @@ export class ResearchAgent implements SubAgent {
           detail: `probe inicial | ${intent.targetEntity}`
         });
 
-        const directProbeLimit = Math.ceil(budget.maxVisitedUrls * 0.35);
+        const directProbeLimit = Math.min(4, Math.ceil(budget.maxVisitedUrls * 0.3));
         for (const url of directCandidates) {
           if (session.visitedUrls.length >= directProbeLimit) break;
           try {
@@ -751,6 +860,20 @@ export class ResearchAgent implements SubAgent {
           emit(context, "agent", "La evidencia ya es suficiente para responder.", {
             title: "lyra encontro suficiente contexto",
             detail: `confianza: ${session.confidence} | urls: ${session.visitedUrls.length}`
+          });
+          break;
+        }
+
+        if (
+          session.confidence === "medium" &&
+          session.officialSourceFound &&
+          (session.evidence.some((finding) => finding.reason === "github_readme") ||
+            session.evidence.some((finding) => finding.reason === "npm_registry") ||
+            session.evidence.some((finding) => finding.reason === "browser_rendered"))
+        ) {
+          emit(context, "agent", "La evidencia ya es suficientemente buena para una respuesta util.", {
+            title: "lyra encontro suficiente contexto",
+            detail: `confianza: ${session.confidence} | evidencia de alta calidad`
           });
           break;
         }

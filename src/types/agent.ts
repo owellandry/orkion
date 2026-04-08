@@ -4,12 +4,14 @@ import type { LLMProvider } from "../providers/types.ts";
 export interface TaskRequest {
   id: string;
   goal: string;
+  resolvedGoal?: string;
   context?: string[];
   constraints?: string[];
   preferredProvider?: ProviderName;
   preferredModel?: string;
   outputFormat?: "text" | "json";
   intentHint?: ResearchIntentType;
+  intentAnalysis?: IntentAnalysis;
 }
 
 export type ResearchIntentType =
@@ -37,6 +39,14 @@ export interface ResearchIntent {
   targetEntity: string;
   contextHints: string[];
   researchRequired: boolean;
+}
+
+export interface IntentAnalysis {
+  originalGoal: string;
+  resolvedGoal: string;
+  strippedTokens: string[];
+  inferredEntityFromHistory: boolean;
+  intent: ResearchIntent;
 }
 
 export type ResearchSourceKind = "official" | "secondary" | "other";
