@@ -1,6 +1,7 @@
 import { write, cursorUp, clearLine } from "../layout.ts";
 import { phaseColor } from "./format.ts";
 import { c } from "../colors.ts";
+import { theme } from "../theme.ts";
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 export const SPINNER_MS = 80;
@@ -55,9 +56,8 @@ export class Spinner {
     const frameChar = SPINNER_FRAMES[this.frame];
     const color = phaseColor(this.title);
 
-    // Minimalist single line spinner:  ⠋ Thinking... (detail here)
     const detailPart = this.detail ? ` ${c.dim}(${this.detail})${c.reset}` : "";
-    const line = `  ${color}${frameChar}${c.reset}  ${c.bold}${this.title}${c.reset}${detailPart}`;
+    const line = `${theme.bar}  ${color}${frameChar}${c.reset}  ${c.bold}${this.title}${c.reset}${detailPart}`;
 
     if (this.active) {
       cursorUp(1);

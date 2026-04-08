@@ -5,6 +5,7 @@ import { write } from "./layout.ts";
 import { Spinner } from "./components/spinner.ts";
 import { normalizeStatus } from "./components/format.ts";
 import { printSummary, printVerboseEvent } from "./components/summary.ts";
+import { theme } from "./theme.ts";
 
 export class ConsoleRenderer {
   private streaming = false;
@@ -15,7 +16,7 @@ export class ConsoleRenderer {
   constructor(private readonly verbose = false) {}
 
   beginTask(goal: string): void {
-    write("\n");
+    // Si viene de args es util, si no es REPL, mantenemos limpio
   }
 
   handle(event: ExecutionEvent): void {
@@ -25,12 +26,13 @@ export class ConsoleRenderer {
         this.streaming = true;
         this.sawStream = true;
         this.atLineStart = true;
-        write(`  ${c.bold}${c.brightMagenta}orkion${c.reset}\n\n`);
+        write(`${theme.bar}\n`);
+        write(`${theme.bar}  ${c.bold}${c.brightMagenta}orkion${c.reset}\n`);
       }
       const chunk = event.chunk ?? "";
       if (chunk) {
-        const prefix = this.atLineStart ? "  " : "";
-        write(prefix + chunk.replace(/\n(?!$)/g, "\n  "));
+        const prefix = this.atLineStart ? `${theme.bar}  ` : "";
+        write(prefix + chunk.replace(/\n(?!$)/g, `\n${theme.bar}  `));
         this.atLineStart = chunk.endsWith("\n");
       }
       return;
@@ -43,7 +45,8 @@ export class ConsoleRenderer {
 
     if (event.kind === "error") {
       this.spinner.stop();
-      write(`  ${c.brightRed}✗ error${c.reset} ${c.dim}${event.message}${c.reset}\n\n`);
+      write(`${theme.bar}\n`);
+      write(`${theme.bar}  ${theme.error} ${c.brightRed}error${c.reset} ${c.dim}${event.message}${c.reset}\n`);
       return;
     }
 
@@ -77,13 +80,15 @@ export class ConsoleRenderer {
     }
 
     if (!this.sawStream && result.text.trim()) {
-      write(`  ${c.bold}${c.brightMagenta}orkion${c.reset}\n\n`);
-      write(`  ${result.text.trim().split("\n").join("\n  ")}\n`);
+      write(`${theme.bar}\n`);
+      write(`${theme.bar}  ${c.bold}${c.brightMagenta}orkion${c.reset}\n`);
+      write(`${theme.bar}  ${result.text.trim().split("\n").join(`\n${theme.bar}  `)}\n`);
     }
 
     if (!result.text.trim() && !this.sawStream) {
-      write(`  ${c.bold}${c.brightMagenta}orkion${c.reset}\n\n`);
-      write(`  ${c.gray}No se generó respuesta.${c.reset}\n`);
+      write(`${theme.bar}\n`);
+      write(`${theme.bar}  ${c.bold}${c.brightMagenta}orkion${c.reset}\n`);
+      write(`${theme.bar}  ${c.gray}No se generó respuesta.${c.reset}\n`);
     }
 
     if (state.json) {

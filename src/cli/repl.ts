@@ -5,6 +5,7 @@ import { printWelcome } from "./ui/welcome.ts";
 import { executeTask } from "./task.ts";
 import { findCommand } from "./commands/index.ts";
 import { c } from "./ui/colors.ts";
+import { theme } from "./ui/theme.ts";
 
 export async function runInteractive(state: CliState): Promise<void> {
   const rl = createInterface({ input, output });
@@ -13,7 +14,7 @@ export async function runInteractive(state: CliState): Promise<void> {
 
   try {
     while (true) {
-      const line = (await rl.question(`  ${c.brightCyan}?${c.reset} ${c.bold}¿Qué te gustaría hacer?${c.reset} `)).trim();
+      const line = (await rl.question(`${theme.bar}\n${theme.step}  ${c.bold}¿Qué te gustaría hacer?${c.reset}\n${theme.bar}  ${theme.arrow} `)).trim();
       if (!line) {
         continue;
       }
