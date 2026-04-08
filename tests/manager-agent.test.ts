@@ -175,6 +175,21 @@ describe("ManagerAgent", () => {
     expect(result.text).toContain("FAKE RESPONSE");
   });
 
+  test("resolves date questions locally without delegating", async () => {
+    const registry = new ProviderRegistry(baseConfig, fakeCredentials, fakeFactory);
+    const policy = new ModelPolicyResolver(baseConfig, registry);
+    const manager = new ManagerAgent(registry, policy, [new WorkerAgent(() => createFakeMcpClient())]);
+
+    const result = await manager.run({
+      id: "task-date",
+      goal: "hola, que tal estas? sabes el dia que es hoy?"
+    });
+
+    expect(result.delegated).toBe(false);
+    expect(result.plan.intentType).toBe("date_time");
+    expect(result.text.toLowerCase()).toContain("hoy es");
+  });
+
   test("uses recent conversation context and strips leaked reasoning", async () => {
     let lastPrompt = "";
 

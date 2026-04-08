@@ -15,6 +15,7 @@ export interface TaskRequest {
 }
 
 export type ResearchIntentType =
+  | "date_time"
   | "definition"
   | "how_it_works"
   | "current_info"

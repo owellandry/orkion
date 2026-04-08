@@ -25,6 +25,37 @@ const DEFAULT_RESEARCH_BUDGET: ResearchBudget = {
   maxPagesPerRound: 3
 };
 
+function buildDateTimeAnswer(task: TaskRequest): string {
+  const now = new Date();
+  const goal = (task.resolvedGoal ?? task.goal).toLowerCase();
+  const wantsTime = /\bhora\b|\btime\b/.test(goal);
+  const wantsDate = /\bdia\b|\bfecha\b|\bdate\b|\btoday\b/.test(goal) || !wantsTime;
+
+  const dateText = new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  }).format(now);
+
+  const timeText = new Intl.DateTimeFormat("es-CO", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true
+  }).format(now);
+
+  if (wantsDate && wantsTime) {
+    return `Hoy es ${dateText} y la hora actual es ${timeText}.`;
+  }
+
+  if (wantsTime) {
+    return `La hora actual es ${timeText}.`;
+  }
+
+  return `Hoy es ${dateText}.`;
+}
+
 function buildConversationBlock(task: TaskRequest): string {
   if (!task.context?.length) {
     return "";
@@ -208,6 +239,14 @@ export class ManagerAgent {
     const targetWorker = this.workers.find((worker) => worker.canHandle(preparedTask));
 
     if (!plan.shouldDelegate || !targetWorker) {
+      if (intent.type === "date_time") {
+        return {
+          text: buildDateTimeAnswer(preparedTask),
+          delegated: false,
+          plan
+        };
+      }
+
       const text = await this.generateManagerResponse(provider, {
         task: preparedTask,
         plan,

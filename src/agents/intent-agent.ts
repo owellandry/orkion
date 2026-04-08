@@ -102,7 +102,7 @@ function scoreIntent(intent: ResearchIntent): number {
 
 function chooseBestResolvedGoal(goal: string): { resolvedGoal: string; strippedTokens: string[]; intent: ResearchIntent } {
   const candidates = buildCandidateGoals(goal);
-  const ranked = candidates
+  const evaluated = candidates
     .map((candidate) => {
       const normalizedCandidate = normalizeGoal(candidate);
       const intent = interpretResearchIntent(normalizedCandidate);
@@ -111,7 +111,18 @@ function chooseBestResolvedGoal(goal: string): { resolvedGoal: string; strippedT
         intent,
         score: scoreIntent(intent)
       };
-    })
+    });
+
+  const preservedCandidate = evaluated.find((entry) => entry.intent.type === "date_time");
+  if (preservedCandidate) {
+    return {
+      resolvedGoal: preservedCandidate.goal,
+      strippedTokens: [],
+      intent: preservedCandidate.intent
+    };
+  }
+
+  const ranked = evaluated
     .sort((left, right) => {
       if (right.score !== left.score) return right.score - left.score;
       return left.goal.length - right.goal.length;
