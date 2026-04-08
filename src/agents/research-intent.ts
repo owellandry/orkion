@@ -7,7 +7,7 @@ const CURRENT_INFO_PATTERNS = [/\bprecio\b/i, /\bactualmente\b/i, /\bhoy\b/i, /\
 const HOW_IT_WORKS_PATTERNS = [/\bcomo funciona\b/i, /\bayudarme a entender\b/i, /\bhow it works\b/i];
 const DEFINITION_PATTERNS = [/\bque es\b/i, /\bque trata\b/i, /\bwhat is\b/i];
 const URL_PATTERNS = [/\bhttp(s)?:\/\//i, /\burl\b/i, /\bsitio\b/i, /\bwebsite\b/i, /\bpagina\b/i];
-const COMPARISON_PATTERNS = [/\bvs\b/i, /\bcompar(a|ar|acion)\b/i, /\bversus\b/i];
+const COMPARISON_PATTERNS = [/\bvs\b/i, /\bcompar(a|ar|acion)\b/i, /\bversus\b/i, /\bmejor\b/i, /\bpeor\b/i, /\bconviene\b/i, /\bbetter\b/i, /\bworse\b/i];
 const RESEARCH_HINT_PATTERNS = [
   /\bbusca(r)?\b/i,
   /\bsearch\b/i,

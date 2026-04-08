@@ -23,12 +23,21 @@ const DEFAULT_RESEARCH_BUDGET: ResearchBudget = {
   maxPagesPerRound: 3
 };
 
+function buildConversationBlock(task: TaskRequest): string {
+  if (!task.context?.length) {
+    return "";
+  }
+
+  return ["Historial reciente:", ...task.context].join("\n");
+}
+
 function buildDirectPrompt(task: TaskRequest, intent: ResearchIntent): string {
   return [
-    "Responde la tarea del usuario de forma breve y util.",
+    "Responde la tarea del usuario de forma breve, util y contextual.",
+    "Si el mensaje actual depende de turnos anteriores, usa el historial reciente.",
     `Intento detectado: ${intent.type}`,
     `Tarea: ${task.goal}`,
-    task.context?.length ? `Contexto adicional: ${task.context.join(" | ")}` : ""
+    buildConversationBlock(task)
   ]
     .filter(Boolean)
     .join("\n");
@@ -43,14 +52,16 @@ function buildDelegatedPrompt(task: TaskRequest, workerResult: AgentTaskResult, 
     "Eres el manager de Orkion.",
     "Responde con una conclusion directa y sustentada por la evidencia del subagente.",
     "No pidas mas contexto ni digas que el usuario te ayude, salvo que la evidencia sea realmente insuficiente.",
+    "Si el mensaje actual depende de turnos anteriores, usa el historial reciente.",
     `Intento detectado: ${intent.type}`,
     `Objetivo original: ${task.goal}`,
+    buildConversationBlock(task),
     `Confianza del subagente: ${workerResult.confidence}`,
     `Resumen ejecutivo del subagente: ${workerResult.reasoningSummary}`,
     `Hallazgos: ${workerResult.summary}`,
     workerResult.sources.length > 0 ? `Fuentes consultadas: ${buildSourceLine(workerResult.sources)}` : "",
     workerResult.errors.length ? `Errores: ${workerResult.errors.join(" | ")}` : "",
-    "Si la confianza es media o baja, añade una nota breve de incertidumbre y menciona las fuentes consultadas."
+    "Si la confianza es media o baja, anade una nota breve de incertidumbre y menciona las fuentes consultadas."
   ]
     .filter(Boolean)
     .join("\n");
@@ -71,6 +82,54 @@ function buildFallbackAnswer(task: TaskRequest, provider: ProviderName, model: s
   }
 
   return parts.join("\n\n");
+}
+
+function sanitizeAssistantText(text: string): string {
+  let cleaned = text.trim();
+  if (!cleaned) {
+    return cleaned;
+  }
+
+  const responseMarker = cleaned.match(/(?:^|\n)\s*respuesta\s*:?\s*([\s\S]*)$/i);
+  if (responseMarker?.[1]?.trim()) {
+    cleaned = responseMarker[1].trim();
+  }
+
+  const metaStarts = [
+    /^okay,\s*el usuario/i,
+    /^el usuario pregunta/i,
+    /^parece que se refiere/i,
+    /^sin mas contexto/i,
+    /^posibles interpretaciones/i,
+    /^respuesta breve/i,
+    /^debo responder/i,
+    /^necesito contexto/i
+  ];
+
+  const paragraphs = cleaned.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  if (paragraphs.length > 1 && metaStarts.some((pattern) => pattern.test(paragraphs[0]))) {
+    const candidate = paragraphs.reverse().find((paragraph) => !metaStarts.some((pattern) => pattern.test(paragraph)));
+    if (candidate) {
+      cleaned = candidate;
+    }
+  }
+
+  const lines = cleaned
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => {
+      const lowered = line.toLowerCase();
+      return !(
+        lowered.startsWith("okay, el usuario") ||
+        lowered.startsWith("el usuario pregunta") ||
+        lowered.startsWith("parece que se refiere") ||
+        lowered.startsWith("posibles interpretaciones") ||
+        lowered.startsWith("debo responder") ||
+        lowered.startsWith("necesito contexto")
+      );
+    });
+
+  return lines.join("\n").trim();
 }
 
 export class ManagerAgent {
@@ -119,8 +178,8 @@ export class ManagerAgent {
       }
     });
 
-    const targetWorker = this.workers.find(w => w.canHandle(task));
-    
+    const targetWorker = this.workers.find((worker) => worker.canHandle(task));
+
     if (!plan.shouldDelegate || !targetWorker) {
       const text = await this.generateManagerResponse(provider, {
         task,
@@ -175,7 +234,7 @@ export class ManagerAgent {
     warnings: string[]
   ): DelegationPlan {
     const delegated = shouldDelegateTask(task.goal);
-    const targetWorker = this.workers.find(w => w.canHandle(task));
+    const targetWorker = this.workers.find((worker) => worker.canHandle(task));
 
     return {
       selectedAgent: delegated && targetWorker ? targetWorker.name : null,
@@ -219,22 +278,21 @@ export class ManagerAgent {
         }
       });
 
-      const response = await provider.streamText({
+      const response = await provider.generateText({
         model: input.plan.model,
-        systemPrompt:
-          "Eres el manager de un sistema multi-agente. No te rindas tras una busqueda fallida. Responde con evidencia, evita frases vagas y no pidas ayuda al usuario si todavia existe una conclusion sustentable.",
-        prompt,
-        onToken: (chunk) => {
-          input.observer?.({
-            scope: "provider",
-            kind: "stream",
-            message: "chunk",
-            chunk
-          });
-        }
+        systemPrompt: [
+          "Eres el manager de un sistema multi-agente.",
+          "No te rindas tras una busqueda fallida.",
+          "Responde con evidencia, evita frases vagas y no pidas ayuda al usuario si todavia existe una conclusion sustentable.",
+          "No reveles razonamiento interno, cadena de pensamiento, analisis oculto, notas privadas ni meta-comentarios sobre el usuario.",
+          "No escribas frases como 'el usuario pregunta', 'necesito contexto', 'posibles interpretaciones' o similares.",
+          "Entrega solo la respuesta final para el usuario, en espanol, salvo que el usuario pida otro idioma."
+        ].join(" "),
+        prompt
       });
 
-      if (response.text.trim().length > 0) {
+      const cleanText = sanitizeAssistantText(response.text);
+      if (cleanText.length > 0) {
         input.observer?.({
           scope: "provider",
           kind: "done",
@@ -244,7 +302,7 @@ export class ManagerAgent {
             detail: `model: ${input.plan.model}`
           }
         });
-        return response.text.trim();
+        return cleanText;
       }
     } catch (error) {
       input.observer?.({

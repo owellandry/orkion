@@ -174,4 +174,52 @@ describe("ManagerAgent", () => {
     expect(result.delegated).toBe(false);
     expect(result.text).toContain("FAKE RESPONSE");
   });
+
+  test("uses recent conversation context and strips leaked reasoning", async () => {
+    let lastPrompt = "";
+
+    const contextualFactory: ProviderFactory = () => ({
+      name: "openrouter" as const,
+      capabilities: {
+        supportsTools: false,
+        supportsStructuredOutput: false
+      },
+      isConfigured() {
+        return true;
+      },
+      async generateText(request: GenerateTextRequest): Promise<GenerateTextResult> {
+        lastPrompt = request.prompt;
+        return {
+          text: [
+            "Okay, el usuario pregunta si openvite es mejor que next.",
+            "Parece que se refiere a una comparacion entre frameworks.",
+            "",
+            "Respuesta:",
+            "No es automaticamente mejor que Next.js; depende del caso. OpenVite puede darte una base mas ligera y flexible, mientras Next.js sigue siendo mas maduro y estable para muchos equipos."
+          ].join("\n")
+        };
+      },
+      async streamText(request: GenerateTextRequest): Promise<GenerateTextResult> {
+        return this.generateText(request);
+      }
+    });
+
+    const registry = new ProviderRegistry(baseConfig, fakeCredentials, contextualFactory);
+    const policy = new ModelPolicyResolver(baseConfig, registry);
+    const manager = new ManagerAgent(registry, policy, [new WorkerAgent(() => createFakeMcpClient())]);
+
+    const result = await manager.run({
+      id: "task-context",
+      goal: "perfecto, puedes entonces si es mejor que next solo? o openvite es peor por asi decirlo?",
+      context: [
+        "user: hola, puedes ayudarme? quiero saber que es openvite puedes buscar?",
+        "assistant: OpenVite es un framework experimental sobre Vite."
+      ]
+    });
+
+    expect(lastPrompt).toContain("Historial reciente:");
+    expect(lastPrompt).toContain("openvite");
+    expect(result.text).not.toContain("Okay, el usuario pregunta");
+    expect(result.text).toContain("No es automaticamente mejor que Next.js");
+  });
 });

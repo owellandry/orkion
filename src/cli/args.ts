@@ -1,16 +1,25 @@
 import type { ProviderName } from "../config/types.ts";
 
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface CliState {
   provider?: ProviderName;
   model?: string;
   json: boolean;
   verbose: boolean;
+  history: ConversationTurn[];
+  historyLimit: number;
 }
 
 export function parseArgs(argv: string[]): { task?: string; state: CliState } {
   const state: CliState = {
     json: false,
-    verbose: false
+    verbose: false,
+    history: [],
+    historyLimit: 6
   };
   const taskParts: string[] = [];
 
