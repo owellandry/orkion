@@ -175,6 +175,76 @@ describe("ManagerAgent", () => {
     expect(result.text).toContain("FAKE RESPONSE");
   });
 
+  test("handles simple greetings locally without spending a model call", async () => {
+    let calls = 0;
+    const greetingFactory: ProviderFactory = () => ({
+      name: "openrouter" as const,
+      capabilities: {
+        supportsTools: false,
+        supportsStructuredOutput: false
+      },
+      isConfigured() {
+        return true;
+      },
+      async generateText(): Promise<GenerateTextResult> {
+        calls += 1;
+        return { text: "should not be used" };
+      },
+      async streamText(): Promise<GenerateTextResult> {
+        calls += 1;
+        return { text: "should not be used" };
+      }
+    });
+
+    const registry = new ProviderRegistry(baseConfig, fakeCredentials, greetingFactory);
+    const policy = new ModelPolicyResolver(baseConfig, registry);
+    const manager = new ManagerAgent(registry, policy, [new WorkerAgent(() => createFakeMcpClient())]);
+
+    const result = await manager.run({
+      id: "task-greeting",
+      goal: "hola que tal?"
+    });
+
+    expect(result.delegated).toBe(false);
+    expect(result.text.toLowerCase()).toContain("hola");
+    expect(calls).toBe(0);
+  });
+
+  test("handles short check-in chat locally without provider calls", async () => {
+    let calls = 0;
+    const greetingFactory: ProviderFactory = () => ({
+      name: "openrouter" as const,
+      capabilities: {
+        supportsTools: false,
+        supportsStructuredOutput: false
+      },
+      isConfigured() {
+        return true;
+      },
+      async generateText(): Promise<GenerateTextResult> {
+        calls += 1;
+        return { text: "should not be used" };
+      },
+      async streamText(): Promise<GenerateTextResult> {
+        calls += 1;
+        return { text: "should not be used" };
+      }
+    });
+
+    const registry = new ProviderRegistry(baseConfig, fakeCredentials, greetingFactory);
+    const policy = new ModelPolicyResolver(baseConfig, registry);
+    const manager = new ManagerAgent(registry, policy, [new WorkerAgent(() => createFakeMcpClient())]);
+
+    const result = await manager.run({
+      id: "task-checkin",
+      goal: "como vas?"
+    });
+
+    expect(result.delegated).toBe(false);
+    expect(result.text.length).toBeGreaterThan(10);
+    expect(calls).toBe(0);
+  });
+
   test("resolves date questions locally without delegating", async () => {
     const registry = new ProviderRegistry(baseConfig, fakeCredentials, fakeFactory);
     const policy = new ModelPolicyResolver(baseConfig, registry);

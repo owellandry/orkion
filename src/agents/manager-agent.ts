@@ -56,6 +56,43 @@ function buildDateTimeAnswer(task: TaskRequest): string {
   return `Hoy es ${dateText}.`;
 }
 
+function pickVariant(seed: string, variants: string[]): string {
+  const value = [...seed].reduce((accumulator, char) => accumulator + char.charCodeAt(0), 0);
+  return variants[value % variants.length] ?? variants[0];
+}
+
+function buildSimpleChatAnswer(task: TaskRequest): string | undefined {
+  const goal = (task.resolvedGoal ?? task.goal).toLowerCase().trim();
+
+  if (
+    /^(hola|buenas|hey|holi)\b/.test(goal) ||
+    /\bque tal\b/.test(goal) ||
+    /\bcomo estas\b/.test(goal) ||
+    /\bcomo vas\b/.test(goal) ||
+    /\bcomo te va\b/.test(goal) ||
+    /\bcomo andas\b/.test(goal) ||
+    /\btodo bien\b/.test(goal)
+  ) {
+    return pickVariant(goal, [
+      "Hola, voy bien por aqui. Listo para ayudarte con lo que necesites.",
+      "Todo en orden por aqui. Dime y le damos.",
+      "Voy bien, gracias. Si quieres seguimos con lo que tengas entre manos.",
+      "Bien por aqui. Cuentame que necesitas y lo resolvemos."
+    ]);
+  }
+
+  if (/\bgracias\b/.test(goal)) {
+    return pickVariant(goal, [
+      "Con gusto.",
+      "De una.",
+      "Para eso estoy.",
+      "Claro, seguimos cuando quieras."
+    ]);
+  }
+
+  return undefined;
+}
+
 function buildConversationBlock(task: TaskRequest): string {
   if (!task.context?.length) {
     return "";
@@ -245,6 +282,17 @@ export class ManagerAgent {
           delegated: false,
           plan
         };
+      }
+
+      if (intent.type === "chat") {
+        const localChatAnswer = buildSimpleChatAnswer(preparedTask);
+        if (localChatAnswer) {
+          return {
+            text: localChatAnswer,
+            delegated: false,
+            plan
+          };
+        }
       }
 
       const text = await this.generateManagerResponse(provider, {

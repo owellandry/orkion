@@ -23,6 +23,7 @@ export function createDefaultProviderFactory(): ProviderFactory {
       name: provider,
       apiKey,
       baseURL: PROVIDER_BASE_URLS[provider],
+      maxRetries: 0,
       defaultHeaders:
         provider === "openrouter"
           ? {

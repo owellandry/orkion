@@ -12,6 +12,7 @@ export interface OpenAICompatibleProviderOptions {
   apiKey: string;
   baseURL: string;
   defaultHeaders?: Record<string, string>;
+  maxRetries?: number;
 }
 
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -28,7 +29,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.client = new OpenAI({
       apiKey: options.apiKey,
       baseURL: options.baseURL,
-      defaultHeaders: options.defaultHeaders
+      defaultHeaders: options.defaultHeaders,
+      maxRetries: options.maxRetries ?? 0
     });
   }
 

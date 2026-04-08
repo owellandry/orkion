@@ -4,7 +4,7 @@ import { c } from "./colors.ts";
 import { write } from "./layout.ts";
 import { Spinner } from "./components/spinner.ts";
 import { normalizeStatus } from "./components/format.ts";
-import { printSummary, printVerboseEvent } from "./components/summary.ts";
+import { printVerboseEvent } from "./components/summary.ts";
 import { theme } from "./theme.ts";
 
 export class ConsoleRenderer {
@@ -95,7 +95,5 @@ export class ConsoleRenderer {
       write("\n" + JSON.stringify(result, null, 2) + "\n");
       return;
     }
-
-    printSummary(result);
   }
 }
