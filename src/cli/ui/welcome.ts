@@ -13,6 +13,5 @@ export function printWelcome(): void {
   printLogo();
   write("\n");
 
-  write(`${theme.start}  ${c.bold}${c.brightWhite}Orkion CLI${c.reset} ${c.dim}v0.1.0${c.reset}\n`);
-  write(`${theme.bar}  ${c.dim}Usa /provider, /model, /json, /verbose, o /exit${c.reset}\n`);
+  write(`${theme.start}  ${c.dim}Usa /provider, /model, /json, /verbose, o /exit${c.reset}\n`);
 }
