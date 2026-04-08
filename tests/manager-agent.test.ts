@@ -133,7 +133,7 @@ describe("ManagerAgent", () => {
   test("delegates to the worker for tool-oriented tasks", async () => {
     const registry = new ProviderRegistry(baseConfig, fakeCredentials, fakeFactory);
     const policy = new ModelPolicyResolver(baseConfig, registry);
-    const manager = new ManagerAgent(registry, policy, new WorkerAgent(() => createFakeMcpClient()));
+    const manager = new ManagerAgent(registry, policy, [new WorkerAgent(() => createFakeMcpClient())]);
     const task: TaskRequest = {
       id: "task-2",
       goal: "Busca sobre openrouter y genera un reporte"
@@ -150,7 +150,7 @@ describe("ManagerAgent", () => {
   test("delegates when the user asks to understand an external framework", async () => {
     const registry = new ProviderRegistry(baseConfig, fakeCredentials, fakeFactory);
     const policy = new ModelPolicyResolver(baseConfig, registry);
-    const manager = new ManagerAgent(registry, policy, new WorkerAgent(() => createFakeMcpClient()));
+    const manager = new ManagerAgent(registry, policy, [new WorkerAgent(() => createFakeMcpClient())]);
 
     const result = await manager.run({
       id: "task-framework",
@@ -164,7 +164,7 @@ describe("ManagerAgent", () => {
   test("responds directly when delegation is not needed", async () => {
     const registry = new ProviderRegistry(baseConfig, fakeCredentials, fakeFactory);
     const policy = new ModelPolicyResolver(baseConfig, registry);
-    const manager = new ManagerAgent(registry, policy, new WorkerAgent(() => createFakeMcpClient()));
+    const manager = new ManagerAgent(registry, policy, [new WorkerAgent(() => createFakeMcpClient())]);
 
     const result = await manager.run({
       id: "task-3",

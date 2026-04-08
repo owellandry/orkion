@@ -20,6 +20,7 @@ export type ResearchIntentType =
   | "url_verification"
   | "general_research"
   | "calculation"
+  | "git_operation"
   | "chat";
 
 export interface ResearchBudget {

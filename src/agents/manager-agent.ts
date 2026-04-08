@@ -77,7 +77,7 @@ export class ManagerAgent {
   constructor(
     private readonly registry: ProviderRegistry,
     private readonly modelPolicy: ModelPolicyResolver,
-    private readonly worker: SubAgent
+    private readonly workers: SubAgent[]
   ) {}
 
   async run(task: TaskRequest, observer?: ExecutionObserver): Promise<ManagerExecutionResult> {
@@ -119,7 +119,9 @@ export class ManagerAgent {
       }
     });
 
-    if (!plan.shouldDelegate) {
+    const targetWorker = this.workers.find(w => w.canHandle(task));
+    
+    if (!plan.shouldDelegate || !targetWorker) {
       const text = await this.generateManagerResponse(provider, {
         task,
         plan,
@@ -137,14 +139,14 @@ export class ManagerAgent {
     observer?.({
       scope: "manager",
       kind: "status",
-      message: `Delegando la consulta al agente ${this.worker.name}.`,
+      message: `Delegando la consulta al agente ${targetWorker.name}.`,
       data: {
-        title: "lyra esta investigando",
+        title: `${targetWorker.name} esta investigando`,
         detail: `objetivo: ${intent.targetEntity}`
       }
     });
 
-    const workerResult = await this.worker.execute(task, plan, {
+    const workerResult = await targetWorker.execute(task, plan, {
       observer,
       provider
     });
@@ -173,13 +175,14 @@ export class ManagerAgent {
     warnings: string[]
   ): DelegationPlan {
     const delegated = shouldDelegateTask(task.goal);
+    const targetWorker = this.workers.find(w => w.canHandle(task));
 
     return {
-      selectedAgent: delegated ? this.worker.name : null,
+      selectedAgent: delegated && targetWorker ? targetWorker.name : null,
       instructions: delegated
-        ? "Investiga de forma persistente, prioriza fuentes oficiales y responde con evidencia."
+        ? "Resuelve la tarea delegada. Prioriza resultados concretos y oficiales."
         : "Respond directly without delegating.",
-      expectedOutput: delegated ? "Structured research result with confidence and sources." : "Direct answer for the user.",
+      expectedOutput: delegated ? "Structured result from the sub-agent." : "Direct answer for the user.",
       shouldDelegate: delegated,
       provider,
       model,

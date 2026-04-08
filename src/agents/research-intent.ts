@@ -2,6 +2,7 @@ import type { ResearchIntent, ResearchIntentType } from "../types/agent.ts";
 
 const CHAT_PATTERNS = [/^hola\b/i, /\bque onda\b/i, /\bsaluda\b/i];
 const CALCULATION_PATTERNS = [/\bcalculate\b/i, /\bcalcula\b/i, /\bmath\b/i, /\bsum\b/i, /\bresta\b/i, /\bmultiply\b/i];
+const GIT_PATTERNS = [/\bgit\b/i, /\bcommit\b/i, /\bpush\b/i, /\bpull\b/i, /\bbranch\b/i, /\bmerge\b/i, /\bpr\b/i, /\brama\b/i, /\brepositorio local\b/i];
 const CURRENT_INFO_PATTERNS = [/\bprecio\b/i, /\bactualmente\b/i, /\bhoy\b/i, /\btoday\b/i, /\bcotizacion\b/i];
 const HOW_IT_WORKS_PATTERNS = [/\bcomo funciona\b/i, /\bayudarme a entender\b/i, /\bhow it works\b/i];
 const DEFINITION_PATTERNS = [/\bque es\b/i, /\bque trata\b/i, /\bwhat is\b/i];
@@ -54,6 +55,10 @@ export function normalizeGoal(goal: string): string {
 }
 
 function detectIntentType(goal: string): ResearchIntentType {
+  if (GIT_PATTERNS.some((pattern) => pattern.test(goal))) {
+    return "git_operation";
+  }
+
   if (CALCULATION_PATTERNS.some((pattern) => pattern.test(goal))) {
     return "calculation";
   }
@@ -177,7 +182,7 @@ export function interpretResearchIntent(goal: string): ResearchIntent {
   const type = detectIntentType(normalizedGoal);
   const contextHints = extractContextHints(normalizedGoal);
   const targetEntity = extractTargetEntity(normalizedGoal);
-  const researchRequired = type !== "chat" || extractUrls(normalizedGoal).length > 0;
+  const researchRequired = type !== "chat" || extractUrls(goal).length > 0;
 
   return {
     type,
