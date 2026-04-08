@@ -24,6 +24,7 @@ export type ResearchIntentType =
   | "general_research"
   | "calculation"
   | "git_operation"
+  | "system_operation"
   | "chat";
 
 export interface ResearchBudget {
