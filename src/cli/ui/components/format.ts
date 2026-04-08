@@ -3,16 +3,16 @@ import { c } from "../colors.ts";
 
 export function fallbackPhaseTitle(scope: ExecutionEvent["scope"]): string {
   switch (scope) {
-    case "manager":  return "Thinking...";
-    case "agent":    return "Agent working...";
+    case "manager":  return "Pensando...";
+    case "agent":    return "Agente trabajando...";
     case "mcp":      return ""; 
-    case "provider": return "Synthesizing...";
+    case "provider": return "Sintetizando...";
   }
 }
 
 export function phaseColor(title: string): string {
-  if (title.includes("lyra") || title.includes("kyra") || title.includes("working")) return c.brightMagenta;
-  if (title.includes("Synthesiz")) return c.brightBlue;
+  if (title.includes("lyra") || title.includes("kyra") || title.includes("trabajando") || title.includes("investigando")) return c.brightMagenta;
+  if (title.includes("Sintetiz")) return c.brightBlue;
   return c.brightCyan;
 }
 

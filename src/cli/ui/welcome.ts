@@ -8,6 +8,6 @@ export function printCommandFeedback(key: string, value: string): void {
 export function printWelcome(): void {
   write("\n");
   write(`  ${c.bold}${c.brightWhite}Orkion CLI${c.reset} ${c.dim}v0.1.0${c.reset}\n`);
-  write(`  ${c.dim}Use /provider, /model, /json, /verbose, or /exit${c.reset}\n`);
+  write(`  ${c.dim}Usa /provider, /model, /json, /verbose, o /exit${c.reset}\n`);
   write("\n");
 }

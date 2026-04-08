@@ -19,20 +19,20 @@ export function printSummary(result: ManagerExecutionResult): void {
   const toolCount    = result.workerResult?.toolCalls.length ?? 0;
   const domains      = result.workerResult?.sources.map((s) => s.domain) ?? [];
 
-  const statusBadge = workerStatus === "success" ? `${c.brightGreen}✓ success${c.reset}` : workerStatus === "error" ? `${c.brightRed}✗ error${c.reset}` : "";
-  const confidenceBadge = confidence === "high" ? `${c.brightGreen}high${c.reset}` : confidence === "medium" ? `${c.brightYellow}medium${c.reset}` : confidence === "low" ? `${c.yellow}low${c.reset}` : "";
+  const statusBadge = workerStatus === "success" ? `${c.brightGreen}✓ éxito${c.reset}` : workerStatus === "error" ? `${c.brightRed}✗ error${c.reset}` : "";
+  const confidenceBadge = confidence === "high" ? `${c.brightGreen}alta${c.reset}` : confidence === "medium" ? `${c.brightYellow}media${c.reset}` : confidence === "low" ? `${c.yellow}baja${c.reset}` : "";
   const sep = `  ${c.gray}·${c.reset}  `;
 
   const parts: string[] = [ `${c.gray}${result.plan.provider}${c.reset}`, `${c.dim}${result.plan.model}${c.reset}` ];
-  if (toolCount > 0) parts.push(`${c.gray}${toolCount} tools${c.reset}`);
+  if (toolCount > 0) parts.push(`${c.gray}${toolCount} herr.${c.reset}`);
   if (statusBadge) parts.push(statusBadge);
-  if (confidenceBadge) parts.push(`confidence ${confidenceBadge}`);
+  if (confidenceBadge) parts.push(`confianza ${confidenceBadge}`);
   if (result.plan.warnings.length > 0) parts.push(`${c.yellow}⚠ ${result.plan.warnings.join(" · ")}${c.reset}`);
 
   write(`\n  ${parts.join(sep)}\n`);
 
   if (domains.length > 0 && confidence !== "high") {
-    write(`  ${c.gray}sources${c.reset}  ${c.dim}${sourceSummary(domains)}${c.reset}\n`);
+    write(`  ${c.gray}fuentes${c.reset}  ${c.dim}${sourceSummary(domains)}${c.reset}\n`);
   }
 
   write("\n");

@@ -83,7 +83,7 @@ export class ConsoleRenderer {
 
     if (!result.text.trim() && !this.sawStream) {
       write(`  ${c.bold}${c.brightMagenta}orkion${c.reset}\n\n`);
-      write(`  ${c.gray}No response generated.${c.reset}\n`);
+      write(`  ${c.gray}No se generó respuesta.${c.reset}\n`);
     }
 
     if (state.json) {
