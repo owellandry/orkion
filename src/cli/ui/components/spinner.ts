@@ -60,10 +60,12 @@ export class Spinner {
     const line = `${theme.bar}  ${color}${frameChar}${c.reset}  ${c.bold}${this.title}${c.reset}${detailPart}`;
 
     if (this.active) {
-      cursorUp(1);
+      clearLine();
+      write(line);
+      return;
     }
 
-    clearLine(); write(line + "\n");
+    write(line);
     this.active = true;
   }
 }

@@ -11,11 +11,11 @@ export function write(text: string): void {
 }
 
 export function cursorUp(n: number): void {
-  write(`\x1b[${n}F`);
+  if (n > 0) write(`\x1b[${n}A`);
 }
 
 export function clearLine(): void {
-  write("\x1b[2K");
+  write("\x1b[2K\r");
 }
 
 export const box = {
