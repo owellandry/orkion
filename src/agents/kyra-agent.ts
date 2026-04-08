@@ -108,26 +108,56 @@ function isGenericCommitMessage(message: string): boolean {
   ].includes(normalized);
 }
 
+function detectPreferredCommitLanguage(goal: string): "es" | "en" {
+  const lowered = goal.toLowerCase();
+  const englishSignals = [
+    "please",
+    "commit",
+    "push",
+    "branch",
+    "current changes",
+    "repository",
+    "update",
+    "fix"
+  ];
+  const spanishSignals = [
+    "puedes",
+    "cambios",
+    "rama",
+    "repositorio",
+    "por favor",
+    "hechos",
+    "actuales",
+    "haz",
+    "hacer"
+  ];
+
+  const englishScore = englishSignals.filter((token) => lowered.includes(token)).length;
+  const spanishScore = spanishSignals.filter((token) => lowered.includes(token)).length;
+
+  return englishScore > spanishScore ? "en" : "es";
+}
+
 function buildFallbackCommitMessage(files: string[], diffStat: string): string {
   const normalizedFiles = files.map((file) => file.replace(/^.*[\\/]/, ""));
 
   if (normalizedFiles.some((file) => file.includes("kyra") || file.includes("git"))) {
-    return "Improve git automation and commit workflow";
+    return "feat: mejorar automatizacion git y flujo de commits";
   }
 
   if (normalizedFiles.some((file) => file.includes("intent"))) {
-    return "Refine intent handling for task routing";
+    return "refactor: refinar manejo de intencion para el enrutamiento";
   }
 
   if (normalizedFiles.some((file) => file.includes("worker") || file.includes("browser") || file.includes("mcp"))) {
-    return "Enhance research agent tooling and MCP flows";
+    return "feat: reforzar herramientas de investigacion y flujos MCP";
   }
 
   if (/test/i.test(diffStat) || normalizedFiles.some((file) => file.includes(".test."))) {
-    return "Expand coverage for recent runtime changes";
+    return "test: ampliar cobertura para cambios recientes del runtime";
   }
 
-  return "Refine agent runtime behavior";
+  return "chore: refinar comportamiento del runtime de agentes";
 }
 
 function buildFallbackCommitBody(files: string[], diffStat: string): string {
@@ -247,6 +277,8 @@ async function generateCommitMessage(
   diffNameStatus: string,
   diffStat: string
 ): Promise<CommitMessageParts> {
+  const preferredLanguage = detectPreferredCommitLanguage(task.goal);
+
   if (!provider) {
     return {
       subject: buildFallbackCommitMessage(snapshot.changedFiles, diffStat),
@@ -259,21 +291,23 @@ async function generateCommitMessage(
     temperature: 0.1,
     maxTokens: 180,
     systemPrompt: [
-      "You are Kyra, generating a git commit message.",
-      "Write a conventional commit subject and a short descriptive body.",
-      "Be specific, concise, and professional.",
-      "Do not use generic messages like update files or misc changes.",
-      "Prefer imperative mood.",
-      "Return either JSON with keys subject and body, or plain text lines starting with Subject: and Body:.",
-      "The subject must follow conventional commits (feat:, fix:, chore:, refactor:, docs:, style:, test:).",
-      "The body should explain the main technical changes in one or two sentences.",
-      "Do not include reasoning or extra commentary."
+      "Eres Kyra y estas generando un mensaje de commit de git.",
+      "Escribe un subject de conventional commit y un body corto y descriptivo.",
+      "Se especifica el idioma preferido del usuario; respeta ese idioma para el texto despues del prefijo conventional commit.",
+      "Se especifico idioma preferido: " + (preferredLanguage === "es" ? "espanol" : "ingles") + ".",
+      "El subject debe seguir conventional commits (feat:, fix:, chore:, refactor:, docs:, style:, test:).",
+      "El texto del subject y del body debe ser especifico, conciso y profesional.",
+      "No uses mensajes genericos como update files o misc changes.",
+      "Devuelve JSON con claves subject y body, o lineas que empiecen por Subject: y Body:.",
+      "El body debe explicar los principales cambios tecnicos en una o dos frases.",
+      "No incluyas razonamiento ni comentario extra."
     ].join(" "),
     prompt: [
-      `User request: ${task.goal}`,
-      `Branch: ${snapshot.branch}`,
-      `Changed files: ${snapshot.changedFiles.join(", ") || "none"}`,
-      "Name-status diff:",
+      `Solicitud del usuario: ${task.goal}`,
+      `Idioma preferido: ${preferredLanguage === "es" ? "espanol" : "ingles"}`,
+      `Rama: ${snapshot.branch}`,
+      `Archivos cambiados: ${snapshot.changedFiles.join(", ") || "none"}`,
+      "Diff name-status:",
       diffNameStatus || "none",
       "Diff stat:",
       diffStat || "none"
