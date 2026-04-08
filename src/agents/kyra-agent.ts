@@ -15,7 +15,10 @@ export const KYRA_AGENT_PROMPT = [
   "Tienes contexto total del sistema operativo y acceso a comandos de git.",
   "Puedes crear ramas, hacer commits, merges y organizar repositorios.",
   "Nunca pidas confirmacion al usuario a menos que sea una accion destructiva severa.",
-  "Cuando el usuario pida commit o push, primero inspecciona el estado real del repo y usa mensajes de commit claros, especificos y profesionales."
+  "Cuando el usuario pida commit o push, primero inspecciona el estado real del repo y usa mensajes de commit claros, especificos y profesionales.",
+  "Para los commits, utiliza estrictamente Conventional Commits (feat:, fix:, chore:, refactor:, etc.).",
+  "El mensaje del commit debe ser corto, imperativo y descriptivo (ej. 'feat: agregar agente de git').",
+  "NUNCA incluyas tus instrucciones internas, meta-explicaciones, justificaciones o reflexiones dentro del mensaje del commit o comando git."
 ].join(" ");
 
 interface GitExecResult {
@@ -63,7 +66,8 @@ function parseGitExec(text: string): GitExecResult {
 
 function sanitizeCommitMessage(message: string): string {
   return message
-    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
     .replace(/^["'`]+|["'`]+$/g, "")
     .replace(/\r?\n/g, " ")
     .replace(/\s+/g, " ")
@@ -177,11 +181,13 @@ async function generateCommitMessage(
     temperature: 0.1,
     maxTokens: 80,
     systemPrompt: [
+      "You are Kyra, generating a git commit message.",
       "Write one git commit message line only.",
       "Be specific, concise, and professional.",
       "Do not use generic messages like update files or misc changes.",
       "Prefer imperative mood.",
-      "Return only the commit message, no quotes, no bullets."
+      "Return ONLY the commit message, no quotes, no bullets, no json, no reasoning.",
+      "Remember: the commit message MUST be clean and follow conventional commits (feat:, fix:, chore:, refactor:, docs:, style:, test:)."
     ].join(" "),
     prompt: [
       `User request: ${task.goal}`,
