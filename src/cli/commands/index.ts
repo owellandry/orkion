@@ -3,6 +3,8 @@ import { modelCommand } from "./model.ts";
 import { jsonCommand } from "./json.ts";
 import { verboseCommand } from "./verbose.ts";
 import { exitCommand } from "./exit.ts";
+import { clearCommand } from "./clear.ts";
+import { compactCommand } from "./compact.ts";
 import { Command } from "./types.ts";
 
 export const commands: Command[] = [
@@ -10,6 +12,8 @@ export const commands: Command[] = [
   modelCommand,
   jsonCommand,
   verboseCommand,
+  clearCommand,
+  compactCommand,
   exitCommand
 ];
 

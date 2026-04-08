@@ -72,7 +72,7 @@ describe("KyraAgent", () => {
     expect(kyra.canHandle({ goal: "calcula 2 + 2" } as TaskRequest)).toBe(false);
   });
 
-  test("creates a specific commit and pushes current branch", async () => {
+  test("creates a specific commit and pushes current branch even with common commit typos", async () => {
     const kyra = new KyraAgent(() =>
       createGitClient({
         "gitExec:git status --short --branch": JSON.stringify({
@@ -111,7 +111,7 @@ describe("KyraAgent", () => {
     const result = await kyra.execute(
       {
         id: "git-commit",
-        goal: "puedes hacer un commit con los cambios actuales de mi proyecto y hacer push de la rama por favor"
+        goal: "puedes hacer un comit con los cambios actuales de mi proyecto y hacer push de la rama por favor"
       },
       plan,
       {

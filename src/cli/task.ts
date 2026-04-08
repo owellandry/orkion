@@ -2,11 +2,18 @@ import type { CliState } from "./args.ts";
 import { createOrkionRuntime } from "../runtime/create-runtime.ts";
 import type { TaskRequest, ExecutionEvent } from "../types/agent.ts";
 import { ConsoleRenderer } from "./ui/renderer.ts";
+import { PermissionController } from "../runtime/permission-control.ts";
 
-function buildConversationContext(state: CliState): string[] {
-  return state.history
+export function buildConversationContext(state: CliState): string[] {
+  const history = state.history
     .slice(-state.historyLimit)
     .map((turn) => `${turn.role}: ${turn.content}`);
+
+  if (state.compactSummary?.trim()) {
+    return [`system: Resumen compacto de la conversacion previa: ${state.compactSummary.trim()}`, ...history];
+  }
+
+  return history;
 }
 
 function rememberTurn(state: CliState, role: "user" | "assistant", content: string): void {
@@ -18,7 +25,10 @@ function rememberTurn(state: CliState, role: "user" | "assistant", content: stri
 }
 
 export async function executeTask(goal: string, state: CliState): Promise<void> {
-  const runtime = createOrkionRuntime();
+  const permissionController = state.permissionStore
+    ? new PermissionController(state.permissionStore, state.permissionPrompter)
+    : undefined;
+  const runtime = createOrkionRuntime({ permissionController });
   const request: TaskRequest = {
     id: crypto.randomUUID(),
     goal,

@@ -6,9 +6,11 @@ import { executeTask } from "./task.ts";
 import { findCommand } from "./commands/index.ts";
 import { c } from "./ui/colors.ts";
 import { theme } from "./ui/theme.ts";
+import { createPermissionPrompter } from "./permissions.ts";
 
 export async function runInteractive(state: CliState): Promise<void> {
   const rl = createInterface({ input, output });
+  state.permissionPrompter = createPermissionPrompter(rl);
 
   printWelcome();
 

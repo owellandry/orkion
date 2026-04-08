@@ -2,7 +2,8 @@ import type { ResearchIntent, ResearchIntentType } from "../types/agent.ts";
 
 const CHAT_PATTERNS = [/^hola\b/i, /\bque onda\b/i, /\bsaluda\b/i];
 const CALCULATION_PATTERNS = [/\bcalculate\b/i, /\bcalcula\b/i, /\bmath\b/i, /\bsum\b/i, /\bresta\b/i, /\bmultiply\b/i];
-const GIT_PATTERNS = [/\bgit\b/i, /\bcommit\b/i, /\bpush\b/i, /\bpull\b/i, /\bbranch\b/i, /\bmerge\b/i, /\bpr\b/i, /\brama\b/i, /\brepositorio local\b/i];
+const COMMIT_PATTERN = /\bcomm?it(?:ear|ea|eando|eado|eados|eadas)?\b/i;
+const GIT_PATTERNS = [/\bgit\b/i, COMMIT_PATTERN, /\bpush\b/i, /\bpull\b/i, /\bbranch\b/i, /\bmerge\b/i, /\bpr\b/i, /\brama\b/i, /\brepositorio local\b/i];
 const SYSTEM_PATTERNS = [/\bcomando\b/i, /\bconsola\b/i, /\bterminal\b/i, /\bbash\b/i, /\bshell\b/i, /\bsistema\b/i, /\bcrea(r)? (una )?(carpeta|directorio|archivo|file)\b/i, /\bejecuta(r)?\b/i, /\blista(r)? archivos\b/i];
 const DATE_TIME_PATTERNS = [
   /\bque dia es hoy\b/i,

@@ -1,4 +1,5 @@
 import type { ProviderName } from "../config/types.ts";
+import type { PermissionPrompter, PermissionStore } from "../runtime/permission-control.ts";
 
 export interface ConversationTurn {
   role: "user" | "assistant";
@@ -12,6 +13,9 @@ export interface CliState {
   verbose: boolean;
   history: ConversationTurn[];
   historyLimit: number;
+  compactSummary?: string;
+  permissionStore?: PermissionStore;
+  permissionPrompter?: PermissionPrompter;
 }
 
 export function parseArgs(argv: string[]): { task?: string; state: CliState } {

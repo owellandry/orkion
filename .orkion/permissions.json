@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "permissions": {
+    "git.exec": {
+      "allowed": true,
+      "updatedAt": "2026-04-08T21:34:16.146Z"
+    }
+  }
+}

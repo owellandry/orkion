@@ -10,6 +10,10 @@ export function write(text: string): void {
   process.stdout.write(text);
 }
 
+export function clearScreen(): void {
+  write("\x1bc");
+}
+
 export function cursorUp(n: number): void {
   if (n > 0) write(`\x1b[${n}A`);
 }

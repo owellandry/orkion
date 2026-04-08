@@ -156,6 +156,18 @@ function buildFallbackAnswer(task: TaskRequest, provider: ProviderName, model: s
   return parts.join("\n\n");
 }
 
+function buildExactOperationalAnswer(workerResult: AgentTaskResult): string {
+  if (workerResult.summary.trim()) {
+    return workerResult.summary.trim();
+  }
+
+  if (workerResult.errors.length > 0) {
+    return workerResult.errors.join("\n");
+  }
+
+  return workerResult.reasoningSummary.trim();
+}
+
 function sanitizeAssistantText(text: string): string {
   let cleaned = text.trim();
   if (!cleaned) {
@@ -323,6 +335,16 @@ export class ManagerAgent {
       observer,
       provider
     });
+
+    if (intent.type === "git_operation") {
+      return {
+        text: buildExactOperationalAnswer(workerResult),
+        delegated: true,
+        plan,
+        workerResult
+      };
+    }
+
     const text = await this.generateManagerResponse(provider, {
       task: preparedTask,
       plan,

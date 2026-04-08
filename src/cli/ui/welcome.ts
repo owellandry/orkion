@@ -13,5 +13,5 @@ export function printWelcome(): void {
   printLogo();
   write("\n");
 
-  write(`${theme.start}  ${c.dim}Usa /provider, /model, /json, /verbose, o /exit${c.reset}\n`);
+  write(`${theme.start}  ${c.dim}Usa /provider, /model, /json, /verbose, /clear, /compact, o /exit${c.reset}\n`);
 }

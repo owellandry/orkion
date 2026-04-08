@@ -3,9 +3,11 @@ import { OrkionConfigurationError } from "../errors/configuration-error.ts";
 import { executeTask } from "./task.ts";
 import { runInteractive } from "./repl.ts";
 import { c } from "./ui/colors.ts";
+import { PermissionStore } from "../runtime/permission-control.ts";
 
 export async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
+  parsed.state.permissionStore = new PermissionStore(process.cwd());
 
   if (parsed.task) {
     await executeTask(parsed.task, parsed.state);

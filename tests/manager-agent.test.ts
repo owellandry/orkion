@@ -7,7 +7,7 @@ import type { McpClientLike } from "../src/mcp/client-adapter.ts";
 import { ModelPolicyResolver } from "../src/providers/model-policy-resolver.ts";
 import { ProviderRegistry, type ProviderFactory } from "../src/providers/provider-registry.ts";
 import type { GenerateTextRequest, GenerateTextResult, LLMProvider } from "../src/providers/types.ts";
-import type { TaskRequest } from "../src/types/agent.ts";
+import type { AgentExecutionContext, AgentTaskResult, DelegationPlan, SubAgent, TaskRequest } from "../src/types/agent.ts";
 
 class FakeProvider implements LLMProvider {
   readonly name = "openrouter" as const;
@@ -306,5 +306,62 @@ describe("ManagerAgent", () => {
     expect(lastPrompt).toContain("openvite");
     expect(result.text).not.toContain("Okay, el usuario pregunta");
     expect(result.text).toContain("No es automaticamente mejor que Next.js");
+  });
+
+  test("returns exact git execution summary without re-synthesizing with the provider", async () => {
+    let calls = 0;
+    const silentFactory: ProviderFactory = () => ({
+      name: "openrouter" as const,
+      capabilities: {
+        supportsTools: false,
+        supportsStructuredOutput: false
+      },
+      isConfigured() {
+        return true;
+      },
+      async generateText(): Promise<GenerateTextResult> {
+        calls += 1;
+        return { text: "should not be used for git summaries" };
+      },
+      async streamText(): Promise<GenerateTextResult> {
+        calls += 1;
+        return { text: "should not be used for git summaries" };
+      }
+    });
+
+    const gitWorker: SubAgent = {
+      name: "kyra",
+      canHandle() {
+        return true;
+      },
+      async execute(_task: TaskRequest, _plan: DelegationPlan, _context?: AgentExecutionContext): Promise<AgentTaskResult> {
+        return {
+          status: "success",
+          summary: "Commit creado: feat: agregar permisos persistentes. Push realizado: branch set up to track origin.",
+          toolCalls: [],
+          errors: [],
+          confidence: "high",
+          sources: [],
+          queriesTried: [],
+          visitedUrls: [],
+          officialSourceFound: true,
+          reasoningSummary: "Commit y push completados."
+        };
+      }
+    };
+
+    const registry = new ProviderRegistry(baseConfig, fakeCredentials, silentFactory);
+    const policy = new ModelPolicyResolver(baseConfig, registry);
+    const manager = new ManagerAgent(registry, policy, [gitWorker]);
+
+    const result = await manager.run({
+      id: "task-git-factual",
+      goal: "puedes hacer un comit de los cambios actuales y push"
+    });
+
+    expect(result.delegated).toBe(true);
+    expect(result.plan.intentType).toBe("git_operation");
+    expect(result.text).toBe("Commit creado: feat: agregar permisos persistentes. Push realizado: branch set up to track origin.");
+    expect(calls).toBe(0);
   });
 });

@@ -38,6 +38,8 @@ interface RepoSnapshot {
   rawStatus: string;
 }
 
+const COMMIT_PATTERN = /\bcomm?it(?:ear|ea|eando|eado|eados|eadas)?\b/i;
+
 function emit(
   context: AgentExecutionContext | undefined,
   scope: ExecutionEvent["scope"],
@@ -134,7 +136,7 @@ function parseRepoSnapshot(statusOutput: string): RepoSnapshot {
 }
 
 function wantsCommit(goal: string): boolean {
-  return /\bcommit\b/i.test(goal);
+  return COMMIT_PATTERN.test(goal);
 }
 
 function wantsPush(goal: string): boolean {
@@ -217,7 +219,7 @@ export class GitAgent implements SubAgent {
   canHandle(task: TaskRequest): boolean {
     return (
       /\bgit\b/i.test(task.goal) ||
-      /\bcommit\b/i.test(task.goal) ||
+      COMMIT_PATTERN.test(task.goal) ||
       /\bpush\b/i.test(task.goal) ||
       /\brama\b/i.test(task.goal) ||
       /\bbranch\b/i.test(task.goal)
