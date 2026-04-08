@@ -1,0 +1,33 @@
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import type { CliState } from "./args.ts";
+import { printWelcome } from "./ui/welcome.ts";
+import { executeTask } from "./task.ts";
+import { findCommand } from "./commands/index.ts";
+import { c } from "./ui/colors.ts";
+
+export async function runInteractive(state: CliState): Promise<void> {
+  const rl = createInterface({ input, output });
+
+  printWelcome();
+
+  try {
+    while (true) {
+      const line = (await rl.question(`  ${c.brightCyan}╭─${c.bold} you${c.reset}\n  ${c.brightCyan}╰─► ${c.reset}`)).trim();
+      if (!line) {
+        continue;
+      }
+
+      const commandMatch = findCommand(line);
+      if (commandMatch) {
+        const { command, args } = commandMatch;
+        await command.execute({ state, args });
+        continue;
+      }
+
+      await executeTask(line, state);
+    }
+  } finally {
+    rl.close();
+  }
+}
