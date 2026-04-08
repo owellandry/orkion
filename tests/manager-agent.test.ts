@@ -3,6 +3,7 @@ import { ManagerAgent } from "../src/agents/manager-agent.ts";
 import { WorkerAgent } from "../src/agents/worker-agent.ts";
 import type { CredentialResolver } from "../src/config/credential-resolver.ts";
 import type { OrkionConfig } from "../src/config/types.ts";
+import type { McpClientLike } from "../src/mcp/client-adapter.ts";
 import { ModelPolicyResolver } from "../src/providers/model-policy-resolver.ts";
 import { ProviderRegistry, type ProviderFactory } from "../src/providers/provider-registry.ts";
 import type { GenerateTextRequest, GenerateTextResult, LLMProvider } from "../src/providers/types.ts";
@@ -70,11 +71,69 @@ const fakeCredentials: CredentialResolver = {
   has: () => true
 };
 
+function createFakeMcpClient(): McpClientLike {
+  const responses: Record<string, string> = {
+    "searchKnowledge:Busca sobre openrouter y genera un reporte": JSON.stringify({
+      query: "Busca sobre openrouter y genera un reporte",
+      results: [{ topic: "openrouter", text: "OpenRouter routes requests to multiple models." }]
+    }),
+    "searchWeb:Busca sobre openrouter y genera un reporte": JSON.stringify({
+      query: "Busca sobre openrouter y genera un reporte",
+      results: [{ title: "OpenRouter Docs", url: "https://openrouter.ai/docs" }]
+    }),
+    "fetchWebPage:https://openrouter.ai/docs": JSON.stringify({
+      url: "https://openrouter.ai/docs",
+      preview: "OpenRouter provides a unified API for many LLM providers."
+    }),
+    "extractLinksFromPage:https://openrouter.ai/docs": JSON.stringify({ url: "https://openrouter.ai/docs", links: [] }),
+    "fetchRobotsOrSitemap:https://openrouter.ai/docs": JSON.stringify({ url: "https://openrouter.ai/docs", robotsPreview: "", sitemapPreview: "" }),
+    "formatReport:Lyra Research Report": "# Lyra Research Report\n\nOpenRouter provides a unified API for many LLM providers.",
+    "searchWeb:hola, puedes ayudarme a entender como funciona vinext, busca info del framework": JSON.stringify({
+      query: "hola, puedes ayudarme a entender como funciona vinext, busca info del framework",
+      results: []
+    }),
+    "searchWeb:vinext framework": JSON.stringify({
+      query: "vinext framework",
+      results: [{ title: "Vinext", url: "https://vinext.io/" }]
+    }),
+    "fetchWebPage:https://vinext.io/": JSON.stringify({
+      url: "https://vinext.io/",
+      preview: "Vinext is a reimplementation of the Next.js API surface on top of Vite."
+    }),
+    "extractLinksFromPage:https://vinext.io/": JSON.stringify({ url: "https://vinext.io/", links: [] }),
+    "fetchRobotsOrSitemap:https://vinext.io/": JSON.stringify({ url: "https://vinext.io/", robotsPreview: "", sitemapPreview: "" })
+  };
+
+  return {
+    async listTools() {
+      return ["searchKnowledge", "searchWeb", "fetchWebPage", "extractLinksFromPage", "fetchRobotsOrSitemap", "formatReport"];
+    },
+    async callTool(name, args) {
+      const key =
+        name === "formatReport"
+          ? `${name}:${String(args.title)}`
+          : name === "searchKnowledge"
+            ? `${name}:${String(args.query)}`
+            : name === "searchWeb"
+              ? `${name}:${String(args.query)}`
+              : `${name}:${String(args.url)}`;
+
+      return {
+        text: responses[key] ?? JSON.stringify({ results: [] }),
+        raw: ""
+      };
+    },
+    async close() {
+      return;
+    }
+  };
+}
+
 describe("ManagerAgent", () => {
   test("delegates to the worker for tool-oriented tasks", async () => {
     const registry = new ProviderRegistry(baseConfig, fakeCredentials, fakeFactory);
     const policy = new ModelPolicyResolver(baseConfig, registry);
-    const manager = new ManagerAgent(registry, policy, new WorkerAgent());
+    const manager = new ManagerAgent(registry, policy, new WorkerAgent(() => createFakeMcpClient()));
     const task: TaskRequest = {
       id: "task-2",
       goal: "Busca sobre openrouter y genera un reporte"
@@ -91,7 +150,7 @@ describe("ManagerAgent", () => {
   test("delegates when the user asks to understand an external framework", async () => {
     const registry = new ProviderRegistry(baseConfig, fakeCredentials, fakeFactory);
     const policy = new ModelPolicyResolver(baseConfig, registry);
-    const manager = new ManagerAgent(registry, policy, new WorkerAgent());
+    const manager = new ManagerAgent(registry, policy, new WorkerAgent(() => createFakeMcpClient()));
 
     const result = await manager.run({
       id: "task-framework",
@@ -105,7 +164,7 @@ describe("ManagerAgent", () => {
   test("responds directly when delegation is not needed", async () => {
     const registry = new ProviderRegistry(baseConfig, fakeCredentials, fakeFactory);
     const policy = new ModelPolicyResolver(baseConfig, registry);
-    const manager = new ManagerAgent(registry, policy, new WorkerAgent());
+    const manager = new ManagerAgent(registry, policy, new WorkerAgent(() => createFakeMcpClient()));
 
     const result = await manager.run({
       id: "task-3",

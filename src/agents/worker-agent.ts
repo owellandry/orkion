@@ -5,7 +5,7 @@ import type {
   AgentTaskResult,
   ConfidenceLevel,
   DelegationPlan,
-  ResearchFinding,
+  ExecutionEvent,
   ResearchIntent,
   ResearchSession,
   ResearchSource,
@@ -20,7 +20,7 @@ export const LYRA_AGENT_PROMPT = [
   "Eres Lyra, la agente de consultas web de Orkion.",
   "Investigas de forma persistente hasta agotar opciones razonables.",
   "Primero usas heuristicas baratas, luego reformulas consultas si la evidencia sigue debil.",
-  "Prioriza fuente oficial, docs, repositorio o dominio principal antes de concluir.",
+  "Prioriza fuente oficial, docs, repositorio, README, paquete npm o dominio principal antes de concluir.",
   "Nunca te rindas tras una sola busqueda fallida y no le pidas al usuario que te ayude si todavia puedes seguir investigando.",
   "Tu salida debe ser una conclusion concreta, mas una nota de incertidumbre breve solo si la evidencia no es fuerte."
 ].join(" ");
@@ -35,25 +35,44 @@ interface ExtractedLinkItem {
   text: string;
 }
 
+interface GitHubReadmeResult {
+  repoUrl?: string;
+  readmeUrl?: string;
+  preview?: string;
+}
+
+interface NpmPackageInfo {
+  packageName?: string;
+  description?: string;
+  latestVersion?: string;
+  homepage?: string;
+  repositoryUrl?: string;
+  keywords?: string[];
+  license?: string;
+}
+
 function preview(value: string): string {
   return value.length > 160 ? `${value.slice(0, 157)}...` : value;
 }
 
-function emit(context: AgentExecutionContext | undefined, scope: "agent" | "mcp", message: string): void {
-  context?.observer?.({
-    scope,
-    kind: "status",
-    message
-  });
+function shortText(value: string, maxLength = 96): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+}
+
+function emit(
+  context: AgentExecutionContext | undefined,
+  scope: ExecutionEvent["scope"],
+  message: string,
+  data?: Record<string, unknown>
+): void {
+  context?.observer?.({ scope, kind: "status", message, data });
 }
 
 function extractMathExpression(goal: string): string | undefined {
   const mathMatch = goal.match(/([0-9()[\]\s+\-*/.]{3,})/);
   const candidate = mathMatch?.[1]?.trim();
-  if (!candidate) {
-    return undefined;
-  }
-
+  if (!candidate) return undefined;
   return /[+\-*/]/.test(candidate) ? candidate : undefined;
 }
 
@@ -77,20 +96,79 @@ function normalizeEntityToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function classifySourceKind(url: string, intent: ResearchIntent): ResearchSourceKind {
+function normalizePathToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9/@_-]/g, "");
+}
+
+function isGitHubRepoUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.includes("github.com")) return false;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return parts.length >= 2 && !parts[2]?.startsWith("issues");
+  } catch {
+    return false;
+  }
+}
+
+function extractGitHubRepoUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.includes("github.com")) return undefined;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) return undefined;
+    return `https://github.com/${parts[0]}/${parts[1].replace(/\.git$/i, "")}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractNpmPackageName(input: string): string | undefined {
+  if (!input.startsWith("http")) {
+    return input.trim() || undefined;
+  }
+
+  try {
+    const parsed = new URL(input);
+    if (!parsed.hostname.includes("npmjs.com")) return undefined;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const packageIndex = parts.findIndex((part) => part === "package");
+    if (packageIndex === -1 || packageIndex === parts.length - 1) return undefined;
+    return decodeURIComponent(parts.slice(packageIndex + 1).join("/"));
+  } catch {
+    return undefined;
+  }
+}
+
+function classifySourceKind(url: string, intent: ResearchIntent, title = ""): ResearchSourceKind {
   const domain = getDomain(url).toLowerCase();
+  const pathToken = normalizePathToken(url);
   const entityToken = normalizeEntityToken(intent.targetEntity);
-  const contextTokens = intent.contextHints.map(normalizeEntityToken);
+  const contextTokens = intent.contextHints.map(normalizeEntityToken).filter(Boolean);
+  const titleToken = normalizeEntityToken(title);
 
-  if (entityToken && domain.replace(/[^a-z0-9]/g, "").includes(entityToken)) {
+  if (entityToken) {
+    if (domain.replace(/[^a-z0-9]/g, "").includes(entityToken)) return "official";
+    if (pathToken.includes(entityToken)) return "official";
+    if (titleToken.includes(entityToken)) return "official";
+  }
+
+  if (contextTokens.some((token) => domain.replace(/[^a-z0-9]/g, "").includes(token) || pathToken.includes(token))) {
     return "official";
   }
 
-  if (contextTokens.some((token) => token && domain.replace(/[^a-z0-9]/g, "").includes(token))) {
-    return "official";
+  if (isGitHubRepoUrl(url) || extractNpmPackageName(url)) {
+    return pathToken.includes(entityToken) ? "official" : "secondary";
   }
 
-  if (domain.includes("github.com") || domain.includes("npmjs.com") || domain.includes("developers.cloudflare.com")) {
+  if (
+    domain.includes("developers.cloudflare.com") ||
+    domain.includes("docs.") ||
+    domain.includes("readthedocs.io") ||
+    domain.includes("jsr.io") ||
+    domain.endsWith(".dev") ||
+    domain.endsWith(".io")
+  ) {
     return "secondary";
   }
 
@@ -120,27 +198,48 @@ function parseExtractedLinks(rawText: string): ExtractedLinkItem[] {
   return parsed?.links ?? [];
 }
 
+function parseGitHubReadme(rawText: string): GitHubReadmeResult {
+  return parseJsonSafely<GitHubReadmeResult>(rawText) ?? {};
+}
+
+function parseNpmPackageInfo(rawText: string): NpmPackageInfo {
+  return parseJsonSafely<NpmPackageInfo>(rawText) ?? {};
+}
+
 function buildInitialQueries(intent: ResearchIntent): string[] {
   const entity = intent.targetEntity;
-  const context = intent.contextHints.join(" ");
+  const context = intent.contextHints.join(" ").trim();
+  const entityQuoted = `"${entity}"`;
 
   const candidates = [
-    intent.normalizedGoal,
+    // Start with the simplest possible queries — just the entity name
+    entity,
+    entityQuoted,
+    `${entity} github`,
+    `${entity} npm`,
     `${entity} ${context}`.trim(),
-    `${entity} official`.trim(),
-    `${entity} docs`.trim(),
-    `${entity} github`.trim(),
-    `${entity} cloudflare`.trim()
+    `what is ${entity}`,
+    `${entity} ${context} framework`.trim(),
+    `${entity} ${context} docs`.trim(),
+    `${entity} ${context} readme`.trim(),
+    `${entity} official documentation`.trim(),
+    `site:github.com ${entity}`.trim(),
+    `site:npmjs.com/package ${entity}`.trim(),
+    `site:jsr.io ${entity}`.trim(),
+    `${entityQuoted} ${context} package`.trim(),
+    intent.normalizedGoal
   ];
 
   if (intent.type === "current_info") {
+    candidates.unshift(`${entity} price today`);
     candidates.unshift(`${entity} precio actual`);
-    candidates.push(`${entity} official price`);
   }
 
-  if (intent.type === "how_it_works" || intent.type === "definition") {
-    candidates.push(`${entity} framework`);
-    candidates.push(`${entity} how it works`);
+  if (intent.type === "definition" || intent.type === "how_it_works" || intent.type === "general_research") {
+    candidates.push(`${entity} ${context} how it works`.trim());
+    candidates.push(`${entity} ${context} introduction`.trim());
+    candidates.push(`${entity} ${context} getting started`.trim());
+    candidates.push(`${entity} ${context} examples`.trim());
   }
 
   return unique(candidates.filter((query) => query.trim().length > 0));
@@ -148,15 +247,162 @@ function buildInitialQueries(intent: ResearchIntent): string[] {
 
 function buildHeuristicReformulations(intent: ResearchIntent, round: number): string[] {
   const entity = intent.targetEntity;
-  const context = intent.contextHints.join(" ");
-  const suffix = round >= 2 ? "guide" : "overview";
+  const context = intent.contextHints.join(" ").trim();
+  const broadDomains = [
+    `site:github.com ${entity} ${context}`.trim(),
+    `site:github.com ${entity} README`.trim(),
+    `site:npmjs.com/package ${entity}`.trim(),
+    `site:registry.npmjs.org ${entity}`.trim(),
+    `site:jsr.io ${entity}`.trim(),
+    `site:readthedocs.io ${entity} ${context}`.trim(),
+    `site:unpkg.com ${entity}`.trim(),
+    `site:jsdelivr.net ${entity}`.trim()
+  ];
+
+  if (intent.contextHints.some((hint) => hint.toLowerCase().includes("cloudflare"))) {
+    broadDomains.push(`site:developers.cloudflare.com ${entity}`);
+    broadDomains.push(`site:blog.cloudflare.com ${entity}`);
+    broadDomains.push(`site:github.com/cloudflare ${entity}`);
+  }
+
+  const phaseQuery =
+    round >= 5
+      ? `${entity} ${context} changelog`.trim()
+      : round >= 4
+        ? `${entity} ${context} installation`.trim()
+        : round >= 3
+          ? `${entity} ${context} guide`.trim()
+          : `${entity} ${context} overview`.trim();
+
+  return unique(
+    [...broadDomains, phaseQuery, `${entity} ${context} docs readme`.trim(), `${entity} ${context} package repo`.trim()]
+      .filter((query) => query.trim().length > 0)
+  );
+}
+
+function buildEmptyResultsFallback(intent: ResearchIntent, session: ResearchSession): string[] {
+  const entity = intent.targetEntity;
+  const context = intent.contextHints.join(" ").trim();
 
   return unique([
-    `${entity} ${context} ${suffix}`.trim(),
-    `${entity} ${context} docs official`.trim(),
-    `${entity} ${context} github readme`.trim(),
-    `${entity} ${context} get started`.trim()
-  ]);
+    `"${entity}"`,
+    `${entity} js`,
+    `${entity} javascript ${context}`.trim(),
+    `${entity} typescript ${context}`.trim(),
+    `${entity} package`,
+    `${entity} open source`,
+    `${entity} repo`,
+    `${entity} framework`
+  ]).filter((query) => !session.queriesTried.includes(query));
+}
+
+function buildDirectUrlCandidates(intent: ResearchIntent): string[] {
+  const slug = intent.targetEntity.toLowerCase().replace(/\s+/g, "-");
+  const compact = intent.targetEntity.toLowerCase().replace(/\s+/g, "");
+  const candidates: string[] = [
+    // Same-name org/repo is the most common GitHub pattern (e.g. openvite/openvite)
+    `https://github.com/${slug}/${slug}`,
+    `https://github.com/${slug}`,
+    `https://www.npmjs.com/package/${slug}`,
+    `https://www.npmjs.com/package/${compact}`,
+    `https://jsr.io/@${slug}`,
+    `https://jsr.io/${slug}`,
+    `https://${slug}.dev`,
+    `https://${slug}.io`,
+    `https://www.${slug}.dev`,
+    `https://www.${slug}.io`
+  ];
+
+  for (const hint of intent.contextHints) {
+    const normalizedHint = hint.toLowerCase().replace(/\s+/g, "-");
+    if (normalizedHint.length < 3 || normalizedHint === slug) continue;
+    candidates.push(`https://github.com/${normalizedHint}/${slug}`);
+  }
+
+  if (intent.contextHints.some((hint) => hint.toLowerCase().includes("cloudflare"))) {
+    candidates.push(`https://developers.cloudflare.com/${slug}/`);
+    candidates.push(`https://blog.cloudflare.com/${slug}`);
+    candidates.push(`https://github.com/cloudflare/${slug}`);
+  }
+
+  return unique(candidates);
+}
+
+function prioritizeResults(results: SearchResultItem[], intent: ResearchIntent): SearchResultItem[] {
+  const entityToken = normalizeEntityToken(intent.targetEntity);
+
+  return results
+    .map((result) => {
+      const text = `${result.title} ${result.url}`.toLowerCase();
+      let score = 0;
+
+      if (entityToken && normalizeEntityToken(text).includes(entityToken)) score += 6;
+      if (text.includes("official")) score += 4;
+      if (text.includes("docs") || text.includes("documentation") || text.includes("readme")) score += 3;
+      if (text.includes("github.com")) score += 3;
+      if (text.includes("npmjs.com") || text.includes("registry.npmjs.org")) score += 3;
+      if (text.includes("jsr.io")) score += 2;
+      if (text.includes("developers.cloudflare.com") || text.includes("blog.cloudflare.com")) score += 2;
+      if (intent.contextHints.some((hint) => text.includes(hint.toLowerCase()))) score += 2;
+
+      return { result, score };
+    })
+    .sort((left, right) => right.score - left.score)
+    .map((entry) => entry.result);
+}
+
+function scoreEvidence(session: ResearchSession): { confidence: ConfidenceLevel; reasoningSummary: string; stopReason: string } {
+  const officialSources = session.sources.filter((source) => source.kind === "official").length;
+  const secondarySources = session.sources.filter((source) => source.kind === "secondary").length;
+  const readmeEvidence = session.evidence.filter((finding) => finding.reason.includes("github_readme")).length;
+  const npmEvidence = session.evidence.filter((finding) => finding.reason.includes("npm_registry")).length;
+
+  let score = 0;
+  if (session.officialSourceFound) score += 4;
+  score += Math.min(officialSources * 2, 6);
+  score += Math.min(secondarySources * 2, 4);
+  score += Math.min(session.visitedUrls.length, 4);
+  score += Math.min(readmeEvidence * 2, 3);
+  score += Math.min(npmEvidence * 2, 3);
+
+  let confidence: ConfidenceLevel = "low";
+  if (score >= 9) confidence = "high";
+  else if (score >= 5) confidence = "medium";
+
+  const reasoningSummary = [
+    `Se analizaron ${session.queriesTried.length} consultas y ${session.visitedUrls.length} URLs.`,
+    session.officialSourceFound
+      ? "Se encontro al menos una fuente oficial, repo o dominio principal relevante."
+      : "No se confirmo una fuente oficial clara.",
+    readmeEvidence > 0 ? "Se inspecciono al menos un README de repositorio." : "",
+    npmEvidence > 0 ? "Se consulto metadata del paquete npm cuando estuvo disponible." : "",
+    `La evidencia acumulada sugiere confianza ${confidence}.`
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const stopReason =
+    confidence === "high"
+      ? "sufficient_evidence"
+      : session.roundsCompleted >= session.budget.maxRounds
+        ? "budget_exhausted"
+        : "need_more_research";
+
+  return { confidence, reasoningSummary, stopReason };
+}
+
+function summarizeFindings(session: ResearchSession): string {
+  if (session.evidence.length === 0) {
+    return `No se encontro evidencia util despues de ${session.queriesTried.length} consultas.`;
+  }
+
+  return session.evidence
+    .slice(0, 8)
+    .map((finding) => {
+      const source = finding.source ? finding.source.domain : "sin fuente";
+      return `${finding.snippet} [${source}]`;
+    })
+    .join("\n");
 }
 
 async function requestLlmReformulations(
@@ -164,22 +410,20 @@ async function requestLlmReformulations(
   plan: DelegationPlan,
   session: ResearchSession
 ): Promise<string[]> {
-  if (!context?.provider) {
-    return [];
-  }
+  if (!context?.provider) return [];
 
   const response = await context.provider.generateText({
     model: plan.model,
-    temperature: 0.1,
-    maxTokens: 180,
+    temperature: 0.2,
+    maxTokens: 220,
     systemPrompt:
-      "Genera solo consultas de busqueda web cortas y utiles para encontrar una respuesta oficial o confiable. Devuelve una consulta por linea sin numeracion.",
+      "Generate only short, effective English web search queries to find official documentation, a GitHub repository, a README, or an npm package. Return one query per line, no numbering.",
     prompt: [
-      `Objetivo: ${session.intent.normalizedGoal}`,
-      `Entidad: ${session.intent.targetEntity}`,
-      `Contexto: ${session.intent.contextHints.join(", ") || "sin contexto extra"}`,
-      `Queries ya usadas: ${session.queriesTried.join(" | ") || "ninguna"}`,
-      "Genera hasta 3 nuevas consultas distintas."
+      `Goal: ${session.intent.normalizedGoal}`,
+      `Entity: ${session.intent.targetEntity}`,
+      `Context hints: ${session.intent.contextHints.join(", ") || "none"}`,
+      `Already tried: ${session.queriesTried.join(" | ") || "none"}`,
+      "Generate up to 5 distinct new queries. Prefer English, use site: operators when helpful, and try README/package/repo variants."
     ].join("\n")
   });
 
@@ -189,93 +433,6 @@ async function requestLlmReformulations(
       .map((line) => line.replace(/^[\-\d.\s]+/, "").trim())
       .filter((line) => line.length > 0)
   );
-}
-
-function prioritizeResults(results: SearchResultItem[], intent: ResearchIntent): SearchResultItem[] {
-  const entityToken = normalizeEntityToken(intent.targetEntity);
-  const scored = results.map((result) => {
-    const url = result.url.toLowerCase();
-    const title = result.title.toLowerCase();
-    let score = 0;
-
-    if (entityToken && normalizeEntityToken(url).includes(entityToken)) {
-      score += 5;
-    }
-
-    if (title.includes("official") || url.includes("/docs") || title.includes("docs")) {
-      score += 3;
-    }
-
-    if (url.includes("github.com") || url.includes("developers.cloudflare.com")) {
-      score += 2;
-    }
-
-    if (intent.contextHints.some((hint) => `${title} ${url}`.includes(hint.toLowerCase()))) {
-      score += 2;
-    }
-
-    return { result, score };
-  });
-
-  return scored
-    .sort((left, right) => right.score - left.score)
-    .map((entry) => entry.result);
-}
-
-function scoreEvidence(session: ResearchSession): { confidence: ConfidenceLevel; reasoningSummary: string; stopReason: string } {
-  let score = 0;
-
-  if (session.officialSourceFound) {
-    score += 4;
-  }
-
-  score += Math.min(session.evidence.length, 4);
-  score += Math.min(session.visitedUrls.length, 2);
-
-  const hasSecondary = session.sources.some((source) => source.kind === "secondary");
-  if (hasSecondary) {
-    score += 1;
-  }
-
-  let confidence: ConfidenceLevel = "low";
-  if (score >= 7) {
-    confidence = "high";
-  } else if (score >= 4) {
-    confidence = "medium";
-  }
-
-  const reasoningSummary = [
-    `Se analizaron ${session.queriesTried.length} consultas y ${session.visitedUrls.length} URLs.`,
-    session.officialSourceFound ? "Se encontro al menos una fuente oficial o de dominio principal." : "No se confirmo una fuente oficial clara.",
-    `La evidencia acumulada sugiere confianza ${confidence}.`
-  ].join(" ");
-
-  const stopReason =
-    confidence === "high"
-      ? "sufficient_evidence"
-      : session.roundsCompleted >= session.budget.maxRounds
-        ? "budget_exhausted"
-        : "need_more_research";
-
-  return {
-    confidence,
-    reasoningSummary,
-    stopReason
-  };
-}
-
-function summarizeFindings(session: ResearchSession): string {
-  if (session.evidence.length === 0) {
-    return `No se encontro evidencia util despues de ${session.queriesTried.length} consultas.`;
-  }
-
-  return session.evidence
-    .slice(0, 5)
-    .map((finding) => {
-      const source = finding.source ? `${finding.source.domain}` : "sin fuente";
-      return `${finding.snippet} [${source}]`;
-    })
-    .join("\n");
 }
 
 export class ResearchAgent implements SubAgent {
@@ -293,12 +450,13 @@ export class ResearchAgent implements SubAgent {
     const toolCalls: ToolCallRecord[] = [];
     const intent = interpretResearchIntent(task.goal);
     const budget = plan.researchBudget ?? {
-      maxRounds: 3,
-      maxVisitedUrls: 6,
-      maxReformulations: 2,
-      maxSearchQueriesPerRound: 2,
-      maxPagesPerRound: 2
+      maxRounds: 6,
+      maxVisitedUrls: 16,
+      maxReformulations: 4,
+      maxSearchQueriesPerRound: 3,
+      maxPagesPerRound: 3
     };
+
     const session: ResearchSession = {
       intent,
       budget,
@@ -314,59 +472,124 @@ export class ResearchAgent implements SubAgent {
       reasoningSummary: ""
     };
 
-    emit(context, "agent", `Lyra interpreto la consulta como ${intent.type}.`);
-    emit(context, "agent", `Entidad detectada: ${intent.targetEntity}.`);
+    emit(context, "agent", `Lyra interpreto la consulta como ${intent.type}.`, {
+      title: "pensando",
+      detail: `intencion: ${intent.type} | entidad: ${intent.targetEntity}`
+    });
 
     try {
-      emit(context, "mcp", "Conectando con MCP y listando herramientas.");
+      emit(context, "mcp", "Conectando con MCP y listando herramientas.", {
+        title: "preparando herramientas",
+        detail: "mcp local listo para investigar web"
+      });
       const tools = await client.listTools();
       const expression = extractMathExpression(task.goal);
       const directUrls = extractUrls(task.goal);
-      const queryQueue = buildInitialQueries(intent);
+      const queryQueue = [...buildInitialQueries(intent)];
+      let emptySearchCount = 0;
 
-      if (expression && tools.includes("calculate")) {
-        emit(context, "mcp", `Ejecutando calculate para ${expression}.`);
-        const response = await client.callTool("calculate", { expression });
-        toolCalls.push({
-          toolName: "calculate",
-          arguments: { expression },
-          resultPreview: preview(response.text)
-        });
-        session.evidence.push({
-          query: expression,
-          snippet: `Resultado numerico: ${response.text}`,
-          reason: "calculation"
-        });
-      }
-
-      const fetchAndCollect = async (url: string, reason: string, query: string, title?: string): Promise<void> => {
-        if (session.visitedUrls.includes(url) || session.visitedUrls.length >= budget.maxVisitedUrls) {
-          return;
-        }
-
-        emit(context, "mcp", `Leyendo contenido relevante: ${url}`);
-        session.visitedUrls.push(url);
-        const pageResponse = await client.callTool("fetchWebPage", { url, maxChars: 2600 });
-        toolCalls.push({
-          toolName: "fetchWebPage",
-          arguments: { url, maxChars: 2600 },
-          resultPreview: preview(pageResponse.text)
-        });
-
-        const source: ResearchSource = {
-          url,
-          domain: getDomain(url),
-          kind: classifySourceKind(url, intent),
-          title
-        };
-
-        if (!session.sources.some((existing) => existing.url === source.url)) {
+      const addSource = (source: ResearchSource): void => {
+        if (!session.sources.some((item) => item.url === source.url)) {
           session.sources.push(source);
         }
         if (source.kind === "official") {
           session.officialSourceFound = true;
         }
+      };
 
+      const collectGitHubReadme = async (repoUrl: string, query: string): Promise<void> => {
+        if (!tools.includes("fetchGitHubReadme")) return;
+
+        emit(context, "mcp", `Leyendo README del repo ${repoUrl}.`, {
+          title: "lyra esta investigando",
+          detail: `github readme | ${shortText(repoUrl)}`
+        });
+        const response = await client.callTool("fetchGitHubReadme", { repoUrl });
+        toolCalls.push({ toolName: "fetchGitHubReadme", arguments: { repoUrl }, resultPreview: preview(response.text) });
+
+        const readme = parseGitHubReadme(response.text);
+        if (!readme.preview?.trim()) return;
+
+        const source: ResearchSource = {
+          url: readme.readmeUrl || repoUrl,
+          domain: getDomain(repoUrl),
+          kind: classifySourceKind(repoUrl, intent, "README"),
+          title: "README"
+        };
+        addSource(source);
+        session.evidence.push({
+          query,
+          source,
+          snippet: readme.preview,
+          reason: "github_readme"
+        });
+      };
+
+      const collectNpmPackageInfo = async (packageName: string, query: string): Promise<void> => {
+        if (!tools.includes("fetchNpmPackageInfo")) return;
+
+        emit(context, "mcp", `Consultando metadata npm de ${packageName}.`, {
+          title: "lyra esta investigando",
+          detail: `npm package | ${packageName}`
+        });
+        const response = await client.callTool("fetchNpmPackageInfo", { packageName });
+        toolCalls.push({ toolName: "fetchNpmPackageInfo", arguments: { packageName }, resultPreview: preview(response.text) });
+
+        const npmInfo = parseNpmPackageInfo(response.text);
+        if (!npmInfo.packageName && !npmInfo.description) return;
+
+        const packageUrl = `https://www.npmjs.com/package/${encodeURIComponent(packageName)}`;
+        const source: ResearchSource = {
+          url: packageUrl,
+          domain: "npmjs.com",
+          kind: classifySourceKind(packageUrl, intent, npmInfo.packageName),
+          title: npmInfo.packageName
+        };
+        addSource(source);
+
+        const summary = [
+          npmInfo.packageName ? `Package: ${npmInfo.packageName}.` : "",
+          npmInfo.description ? `Descripcion: ${npmInfo.description}` : "",
+          npmInfo.latestVersion ? `Version: ${npmInfo.latestVersion}.` : "",
+          npmInfo.license ? `Licencia: ${npmInfo.license}.` : "",
+          npmInfo.keywords?.length ? `Keywords: ${npmInfo.keywords.slice(0, 8).join(", ")}.` : ""
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        session.evidence.push({
+          query,
+          source,
+          snippet: summary,
+          reason: "npm_registry"
+        });
+
+        if (npmInfo.repositoryUrl) {
+          const repoUrl = npmInfo.repositoryUrl.replace(/^git\+/, "").replace(/\.git$/, "");
+          if (!session.visitedUrls.includes(repoUrl)) {
+            await fetchAndCollect(repoUrl, "npm_repository", query, "Repository from npm");
+          }
+        }
+
+        if (npmInfo.homepage && !session.visitedUrls.includes(npmInfo.homepage)) {
+          await fetchAndCollect(npmInfo.homepage, "npm_homepage", query, "Homepage from npm");
+        }
+      };
+
+      const fetchAndCollect = async (url: string, reason: string, query: string, title?: string): Promise<void> => {
+        if (session.visitedUrls.includes(url) || session.visitedUrls.length >= budget.maxVisitedUrls) return;
+
+        emit(context, "mcp", `Leyendo ${url}.`, {
+          title: "lyra esta investigando",
+          detail: `fuente: ${getDomain(url)} | motivo: ${reason}`
+        });
+        session.visitedUrls.push(url);
+
+        const pageResponse = await client.callTool("fetchWebPage", { url, maxChars: 3600 });
+        toolCalls.push({ toolName: "fetchWebPage", arguments: { url, maxChars: 3600 }, resultPreview: preview(pageResponse.text) });
+
+        const source: ResearchSource = { url, domain: getDomain(url), kind: classifySourceKind(url, intent, title), title };
+        addSource(source);
         session.evidence.push({
           query,
           source,
@@ -374,26 +597,45 @@ export class ResearchAgent implements SubAgent {
           reason
         });
 
+        const repoUrl = extractGitHubRepoUrl(url);
+        if (repoUrl) {
+          await collectGitHubReadme(repoUrl, query);
+        }
+
+        const packageName = extractNpmPackageName(url);
+        if (packageName) {
+          await collectNpmPackageInfo(packageName, query);
+        }
+
         if (tools.includes("extractLinksFromPage")) {
           const linksResponse = await client.callTool("extractLinksFromPage", {
             url,
-            maxLinks: 4,
-            keywords: ["docs", "documentation", "guide", "getting-started", "api", "github", "readme"]
+            maxLinks: 8,
+            keywords: [
+              "docs",
+              "documentation",
+              "guide",
+              "getting-started",
+              "api",
+              "github",
+              "readme",
+              "quickstart",
+              "npm",
+              "package",
+              "installation"
+            ]
           });
-          toolCalls.push({
-            toolName: "extractLinksFromPage",
-            arguments: { url, maxLinks: 4 },
-            resultPreview: preview(linksResponse.text)
-          });
+          toolCalls.push({ toolName: "extractLinksFromPage", arguments: { url, maxLinks: 8 }, resultPreview: preview(linksResponse.text) });
 
           const candidateLinks = parseExtractedLinks(linksResponse.text);
-          for (const link of candidateLinks.slice(0, 2)) {
-            if (session.visitedUrls.length >= budget.maxVisitedUrls) {
-              break;
-            }
+          for (const link of candidateLinks.slice(0, 4)) {
+            if (session.visitedUrls.length >= budget.maxVisitedUrls) break;
 
-            const linkKind = classifySourceKind(link.url, intent);
-            if (linkKind === "official" || link.url.includes("docs") || link.url.includes("github.com")) {
+            const shouldFollow =
+              classifySourceKind(link.url, intent, link.text) !== "other" ||
+              /docs|readme|guide|get-started|quickstart|github|npm|package|api/i.test(`${link.text} ${link.url}`);
+
+            if (shouldFollow) {
               await fetchAndCollect(link.url, `linked_follow_up:${link.text || "related"}`, query, link.text);
             }
           }
@@ -401,11 +643,7 @@ export class ResearchAgent implements SubAgent {
 
         if (tools.includes("fetchRobotsOrSitemap") && source.kind === "official") {
           const siteResponse = await client.callTool("fetchRobotsOrSitemap", { url });
-          toolCalls.push({
-            toolName: "fetchRobotsOrSitemap",
-            arguments: { url },
-            resultPreview: preview(siteResponse.text)
-          });
+          toolCalls.push({ toolName: "fetchRobotsOrSitemap", arguments: { url }, resultPreview: preview(siteResponse.text) });
           session.evidence.push({
             query,
             source,
@@ -415,47 +653,92 @@ export class ResearchAgent implements SubAgent {
         }
       };
 
+      if (expression && tools.includes("calculate")) {
+        emit(context, "mcp", `Ejecutando calculate para ${expression}.`, {
+          title: "pensando",
+          detail: `calculo detectado | ${expression}`
+        });
+        const response = await client.callTool("calculate", { expression });
+        toolCalls.push({ toolName: "calculate", arguments: { expression }, resultPreview: preview(response.text) });
+        session.evidence.push({ query: expression, snippet: `Resultado numerico: ${response.text}`, reason: "calculation" });
+      }
+
       for (const url of directUrls) {
         await fetchAndCollect(url, "direct_url", intent.normalizedGoal, "Direct URL");
       }
 
+      if (intent.type === "definition" || intent.type === "how_it_works" || intent.type === "general_research") {
+        const directCandidates = buildDirectUrlCandidates(intent);
+        emit(context, "agent", `Probando ${directCandidates.length} URLs directas candidatas.`, {
+          title: "lyra esta investigando",
+          detail: `probe inicial | ${intent.targetEntity}`
+        });
+
+        const directProbeLimit = Math.ceil(budget.maxVisitedUrls * 0.35);
+        for (const url of directCandidates) {
+          if (session.visitedUrls.length >= directProbeLimit) break;
+          try {
+            await fetchAndCollect(url, "direct_probe", intent.normalizedGoal);
+          } catch {
+            continue;
+          }
+        }
+      }
+
       while (session.roundsCompleted < budget.maxRounds) {
         session.roundsCompleted += 1;
-        emit(context, "agent", `Ronda ${session.roundsCompleted} de investigacion.`);
+        emit(context, "agent", `Ronda ${session.roundsCompleted} de investigacion.`, {
+          title: "lyra esta investigando",
+          detail: `ronda ${session.roundsCompleted}/${budget.maxRounds} | consultas: ${session.queriesTried.length}`
+        });
 
         const roundQueries = queryQueue
           .filter((query) => !session.queriesTried.includes(query))
           .slice(0, budget.maxSearchQueriesPerRound);
 
         if (roundQueries.length === 0) {
+          emit(context, "agent", "Cola de consultas agotada.", {
+            title: "lyra esta investigando",
+            detail: "no quedan queries frescas"
+          });
           break;
         }
 
         for (const query of roundQueries) {
           session.queriesTried.push(query);
+          if (!tools.includes("searchWeb")) continue;
 
-          if (tools.includes("searchWeb")) {
-            emit(context, "mcp", `Buscando en la web: ${query}`);
-            const response = await client.callTool("searchWeb", { query, maxResults: 4 });
-            toolCalls.push({
-              toolName: "searchWeb",
-              arguments: { query, maxResults: 4 },
-              resultPreview: preview(response.text)
+          emit(context, "mcp", `Buscando: ${query}`, {
+            title: "lyra esta investigando",
+            detail: `query: ${shortText(query)}`
+          });
+          const response = await client.callTool("searchWeb", { query, maxResults: 6 });
+          toolCalls.push({ toolName: "searchWeb", arguments: { query, maxResults: 6 }, resultPreview: preview(response.text) });
+
+          const results = prioritizeResults(parseSearchWebResult(response.text), intent);
+          if (results.length === 0) {
+            emptySearchCount += 1;
+            emit(context, "agent", `Sin resultados para: "${query}". Variante encolada.`, {
+              title: "lyra esta investigando",
+              detail: `sin resultados | ${shortText(query)}`
             });
 
-            const results = prioritizeResults(parseSearchWebResult(response.text), intent);
-            session.evidence.push({
-              query,
-              snippet: response.text,
-              reason: "search_results"
-            });
-
-            for (const result of results.slice(0, budget.maxPagesPerRound)) {
-              if (session.visitedUrls.length >= budget.maxVisitedUrls) {
-                break;
+            if (emptySearchCount >= 2) {
+              const fallbacks = buildEmptyResultsFallback(intent, session);
+              if (fallbacks.length > 0) {
+                queryQueue.unshift(...fallbacks);
               }
-              await fetchAndCollect(result.url, `search_result:${result.title}`, query, result.title);
+              emptySearchCount = 0;
             }
+            continue;
+          }
+
+          emptySearchCount = 0;
+          session.evidence.push({ query, snippet: response.text, reason: "search_results" });
+
+          for (const result of results.slice(0, budget.maxPagesPerRound)) {
+            if (session.visitedUrls.length >= budget.maxVisitedUrls) break;
+            await fetchAndCollect(result.url, `search_result:${result.title}`, query, result.title);
           }
         }
 
@@ -465,12 +748,18 @@ export class ResearchAgent implements SubAgent {
         session.stopReason = evaluation.stopReason;
 
         if (session.confidence === "high") {
-          emit(context, "agent", "La evidencia ya es suficiente para responder.");
+          emit(context, "agent", "La evidencia ya es suficiente para responder.", {
+            title: "lyra encontro suficiente contexto",
+            detail: `confianza: ${session.confidence} | urls: ${session.visitedUrls.length}`
+          });
           break;
         }
 
         if (session.roundsCompleted >= budget.maxRounds) {
-          emit(context, "agent", "Se agoto el presupuesto de investigacion.");
+          emit(context, "agent", "Se agoto el presupuesto de investigacion.", {
+            title: "lyra termino de investigar",
+            detail: `presupuesto agotado | confianza: ${session.confidence}`
+          });
           break;
         }
 
@@ -478,7 +767,6 @@ export class ResearchAgent implements SubAgent {
           session.reformulationsUsed < budget.maxReformulations
             ? await requestLlmReformulations(context, plan, session).catch(() => [])
             : [];
-
         const heuristicQueries = buildHeuristicReformulations(intent, session.roundsCompleted);
         const nextQueries = unique([...llmQueries, ...heuristicQueries]).filter(
           (query) => !session.queriesTried.includes(query)
@@ -486,15 +774,21 @@ export class ResearchAgent implements SubAgent {
 
         if (llmQueries.length > 0) {
           session.reformulationsUsed += 1;
-          emit(context, "agent", `Lyra reformulo consultas para la ronda ${session.roundsCompleted + 1}.`);
+          emit(context, "agent", `${llmQueries.length} consultas nuevas del modelo para la siguiente ronda.`, {
+            title: "lyra replantea la busqueda",
+            detail: shortText(llmQueries[0] ?? "nueva query")
+          });
         }
 
         if (nextQueries.length === 0) {
-          emit(context, "agent", "No quedan consultas nuevas razonables para seguir investigando.");
+          emit(context, "agent", "No quedan consultas nuevas razonables para seguir investigando.", {
+            title: "lyra termino de investigar",
+            detail: "sin queries nuevas"
+          });
           break;
         }
 
-        queryQueue.push(...nextQueries);
+        queryQueue.unshift(...nextQueries);
       }
 
       const finalEvaluation = scoreEvidence(session);
@@ -503,38 +797,34 @@ export class ResearchAgent implements SubAgent {
       session.stopReason = finalEvaluation.stopReason;
 
       let summary = summarizeFindings(session);
-
       if (tools.includes("formatReport")) {
-        emit(context, "mcp", "Formateando reporte final de Lyra.");
+        emit(context, "mcp", "Formateando reporte final de Lyra.", {
+          title: "lyra organiza hallazgos",
+          detail: `evidencias: ${session.evidence.length} | confianza: ${session.confidence}`
+        });
         const response = await client.callTool("formatReport", {
           title: "Lyra Research Report",
-          bullets: session.evidence.slice(0, 5).map((finding) => finding.snippet),
+          bullets: session.evidence.slice(0, 8).map((finding) => finding.snippet),
           summary: session.reasoningSummary
         });
-        toolCalls.push({
-          toolName: "formatReport",
-          arguments: {
-            title: "Lyra Research Report"
-          },
-          resultPreview: preview(response.text)
-        });
+        toolCalls.push({ toolName: "formatReport", arguments: { title: "Lyra Research Report" }, resultPreview: preview(response.text) });
         summary = response.text;
       }
 
       context?.observer?.({
         scope: "agent",
         kind: "done",
-        message: "Lyra termino la consulta."
+        message: "Lyra termino la consulta.",
+        data: {
+          title: "lyra termino de investigar",
+          detail: `confianza: ${session.confidence} | fuentes: ${session.sources.length}`
+        }
       });
 
       return {
         status: "success",
         summary,
-        data: {
-          agentName: this.name,
-          prompt: this.prompt,
-          session
-        },
+        data: { agentName: this.name, prompt: this.prompt, session },
         toolCalls,
         errors: [],
         confidence: session.confidence,
@@ -548,17 +838,17 @@ export class ResearchAgent implements SubAgent {
       context?.observer?.({
         scope: "agent",
         kind: "error",
-        message: error instanceof Error ? error.message : String(error)
+        message: error instanceof Error ? error.message : String(error),
+        data: {
+          title: "lyra encontro un problema",
+          detail: "la investigacion fallo antes de completarse"
+        }
       });
 
       return {
         status: "error",
         summary: "Lyra no pudo completar la investigacion delegada.",
-        data: {
-          agentName: this.name,
-          prompt: this.prompt,
-          session
-        },
+        data: { agentName: this.name, prompt: this.prompt, session },
         toolCalls,
         errors: [error instanceof Error ? error.message : String(error)],
         confidence: session.confidence,

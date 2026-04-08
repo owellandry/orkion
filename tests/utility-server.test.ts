@@ -53,4 +53,84 @@ describe("MCP utility server web tools", () => {
     expect(text).toContain("Example Docs");
     expect(text).toContain("https://example.com/docs");
   });
+
+  test("fetchGitHubReadme and fetchNpmPackageInfo expose structured research helpers", async () => {
+    const fakeCurl: CurlRunner = async (args) => {
+      const target = args[args.length - 1];
+
+      if (target.includes("raw.githubusercontent.com")) {
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: "# Vinext\n\nVinext is a Next.js-compatible framework surface on top of Vite."
+        };
+      }
+
+      if (target.includes("registry.npmjs.org")) {
+        return {
+          exitCode: 0,
+          stderr: "",
+          stdout: JSON.stringify({
+            name: "vinext",
+            description: "Framework surface for Vite and Cloudflare.",
+            license: "MIT",
+            homepage: "https://vinext.io/",
+            repository: { url: "git+https://github.com/openvitejs/vinext.git" },
+            keywords: ["vite", "cloudflare"],
+            "dist-tags": { latest: "0.8.0" }
+          })
+        };
+      }
+
+      return {
+        exitCode: 1,
+        stderr: "unexpected url",
+        stdout: ""
+      };
+    };
+
+    const server = createMcpUtilityServer(fakeCurl);
+    const client = new Client({
+      name: "test-client",
+      version: "1.0.0"
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const readmeResult = (await client.callTool(
+      {
+        name: "fetchGitHubReadme",
+        arguments: {
+          repoUrl: "https://github.com/openvitejs/vinext"
+        }
+      },
+      CallToolResultSchema
+    )) as CallToolResult;
+
+    const npmResult = (await client.callTool(
+      {
+        name: "fetchNpmPackageInfo",
+        arguments: {
+          packageName: "vinext"
+        }
+      },
+      CallToolResultSchema
+    )) as CallToolResult;
+
+    const readmeText = readmeResult.content
+      .filter((item) => item.type === "text")
+      .map((item) => item.text)
+      .join("\n");
+
+    const npmText = npmResult.content
+      .filter((item) => item.type === "text")
+      .map((item) => item.text)
+      .join("\n");
+
+    expect(readmeText).toContain("Vinext is a Next.js-compatible framework surface on top of Vite");
+    expect(npmText).toContain('"packageName":"vinext"');
+    expect(npmText).toContain('"repositoryUrl":"https://github.com/openvitejs/vinext"');
+  });
 });

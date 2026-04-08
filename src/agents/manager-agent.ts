@@ -16,11 +16,11 @@ import type {
 } from "../types/agent.ts";
 
 const DEFAULT_RESEARCH_BUDGET: ResearchBudget = {
-  maxRounds: 3,
-  maxVisitedUrls: 6,
-  maxReformulations: 2,
-  maxSearchQueriesPerRound: 2,
-  maxPagesPerRound: 2
+  maxRounds: 6,
+  maxVisitedUrls: 16,
+  maxReformulations: 4,
+  maxSearchQueriesPerRound: 3,
+  maxPagesPerRound: 3
 };
 
 function buildDirectPrompt(task: TaskRequest, intent: ResearchIntent): string {
@@ -86,12 +86,20 @@ export class ManagerAgent {
     observer?.({
       scope: "manager",
       kind: "status",
-      message: `Intencion detectada: ${intent.type}.`
+      message: `Intencion detectada: ${intent.type}.`,
+      data: {
+        title: "pensando",
+        detail: `intencion: ${intent.type} | entidad: ${intent.targetEntity}`
+      }
     });
     observer?.({
       scope: "manager",
       kind: "status",
-      message: "Analizando la tarea y resolviendo provider/modelo."
+      message: "Analizando la tarea y resolviendo provider/modelo.",
+      data: {
+        title: "pensando",
+        detail: "revisando config, credenciales y modelo"
+      }
     });
 
     const selection = this.modelPolicy.resolve({
@@ -104,7 +112,11 @@ export class ManagerAgent {
     observer?.({
       scope: "manager",
       kind: "status",
-      message: `Provider elegido: ${selection.provider}. Modelo: ${selection.model}.`
+      message: `Provider elegido: ${selection.provider}. Modelo: ${selection.model}.`,
+      data: {
+        title: "pensando",
+        detail: `provider: ${selection.provider} | model: ${selection.model}`
+      }
     });
 
     if (!plan.shouldDelegate) {
@@ -125,7 +137,11 @@ export class ManagerAgent {
     observer?.({
       scope: "manager",
       kind: "status",
-      message: `Delegando la consulta al agente ${this.worker.name}.`
+      message: `Delegando la consulta al agente ${this.worker.name}.`,
+      data: {
+        title: "lyra esta investigando",
+        detail: `objetivo: ${intent.targetEntity}`
+      }
     });
 
     const workerResult = await this.worker.execute(task, plan, {
@@ -193,7 +209,11 @@ export class ManagerAgent {
       input.observer?.({
         scope: "provider",
         kind: "status",
-        message: `Solicitando respuesta al modelo ${input.plan.model}.`
+        message: `Solicitando respuesta al modelo ${input.plan.model}.`,
+        data: {
+          title: "sintetizando respuesta",
+          detail: `provider: ${input.plan.provider} | model: ${input.plan.model}`
+        }
       });
 
       const response = await provider.streamText({
@@ -215,7 +235,11 @@ export class ManagerAgent {
         input.observer?.({
           scope: "provider",
           kind: "done",
-          message: "Respuesta del modelo completada."
+          message: "Respuesta del modelo completada.",
+          data: {
+            title: "sintesis final lista",
+            detail: `model: ${input.plan.model}`
+          }
         });
         return response.text.trim();
       }
@@ -223,7 +247,11 @@ export class ManagerAgent {
       input.observer?.({
         scope: "provider",
         kind: "error",
-        message: error instanceof Error ? error.message : String(error)
+        message: error instanceof Error ? error.message : String(error),
+        data: {
+          title: "sintesis con error",
+          detail: "se usara fallback local si hace falta"
+        }
       });
     }
 

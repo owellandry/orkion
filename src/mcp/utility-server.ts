@@ -113,6 +113,50 @@ function extractLinks(html: string, pageUrl: string, maxLinks: number, keywords?
     .slice(0, maxLinks);
 }
 
+function parseGitHubRepo(repoUrl: string): { owner: string; repo: string; normalizedUrl: string } | undefined {
+  try {
+    const parsed = new URL(repoUrl);
+    if (!parsed.hostname.includes("github.com")) {
+      return undefined;
+    }
+
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) {
+      return undefined;
+    }
+
+    const owner = parts[0];
+    const repo = parts[1].replace(/\.git$/i, "");
+    return {
+      owner,
+      repo,
+      normalizedUrl: `https://github.com/${owner}/${repo}`
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function extractNpmPackageName(packageUrlOrName: string): string {
+  if (!packageUrlOrName.startsWith("http")) {
+    return packageUrlOrName.trim();
+  }
+
+  try {
+    const parsed = new URL(packageUrlOrName);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const packageIndex = parts.findIndex((part) => part === "package");
+    if (packageIndex === -1 || packageIndex === parts.length - 1) {
+      return "";
+    }
+
+    const nameParts = parts.slice(packageIndex + 1);
+    return decodeURIComponent(nameParts.join("/"));
+  } catch {
+    return "";
+  }
+}
+
 async function runCurlJson(
   runner: CurlRunner,
   args: string[],
@@ -338,6 +382,121 @@ export function createMcpUtilityServer(curlRunner: CurlRunner = defaultCurlRunne
               robotsPreview: robots ? robots.stdout.slice(0, 1200) : "",
               sitemapUrl,
               sitemapPreview: sitemap ? sitemap.stdout.slice(0, 1200) : ""
+            })
+          }
+        ]
+      };
+    }
+  );
+
+  const githubReadmeSchema = {
+    repoUrl: z.string().url().describe("GitHub repository URL.")
+  };
+
+  server.registerTool(
+    "fetchGitHubReadme",
+    {
+      description: "Fetches a README preview from a GitHub repository using raw content fallbacks.",
+      inputSchema: githubReadmeSchema
+    },
+    async ({ repoUrl }: z.infer<z.ZodObject<typeof githubReadmeSchema>>) => {
+      const repo = parseGitHubRepo(repoUrl);
+      if (!repo) {
+        throw new Error("Invalid GitHub repository URL.");
+      }
+
+      const candidatePaths = [
+        ["main", "README.md"],
+        ["main", "README.mdx"],
+        ["main", "readme.md"],
+        ["master", "README.md"],
+        ["master", "README.mdx"],
+        ["master", "readme.md"]
+      ];
+
+      let matchedUrl = "";
+      let preview = "";
+
+      for (const [branch, fileName] of candidatePaths) {
+        const rawUrl = `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/refs/heads/${branch}/${fileName}`;
+        const result = await runCurlJson(
+          curlRunner,
+          ["-L", "-f", "-sS", "--max-time", "20", rawUrl],
+          "GitHub README fetch failed"
+        ).catch(() => undefined);
+
+        if (result?.stdout.trim()) {
+          matchedUrl = rawUrl;
+          preview = stripHtml(result.stdout, 5000);
+          break;
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              repoUrl: repo.normalizedUrl,
+              readmeUrl: matchedUrl,
+              preview
+            })
+          }
+        ]
+      };
+    }
+  );
+
+  const npmPackageSchema = {
+    packageName: z.string().describe("npm package name or npm package URL.")
+  };
+
+  server.registerTool(
+    "fetchNpmPackageInfo",
+    {
+      description: "Fetches npm registry metadata for a package and returns a compact summary.",
+      inputSchema: npmPackageSchema
+    },
+    async ({ packageName }: z.infer<z.ZodObject<typeof npmPackageSchema>>) => {
+      const resolvedName = extractNpmPackageName(packageName);
+      if (!resolvedName) {
+        throw new Error("Invalid npm package name.");
+      }
+
+      const registryUrl = `https://registry.npmjs.org/${encodeURIComponent(resolvedName)}`;
+      const result = await runCurlJson(
+        curlRunner,
+        ["-L", "-sS", "--max-time", "20", registryUrl],
+        "npm registry fetch failed"
+      );
+
+      const raw = JSON.parse(result.stdout) as {
+        name?: string;
+        description?: string;
+        license?: string;
+        homepage?: string;
+        repository?: string | { url?: string };
+        keywords?: string[];
+        "dist-tags"?: { latest?: string };
+      };
+
+      const repositoryUrl =
+        typeof raw.repository === "string"
+          ? raw.repository
+          : raw.repository?.url?.replace(/^git\+/, "").replace(/\.git$/, "");
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              packageName: raw.name ?? resolvedName,
+              description: raw.description ?? "",
+              latestVersion: raw["dist-tags"]?.latest ?? "",
+              homepage: raw.homepage ?? "",
+              repositoryUrl: repositoryUrl ?? "",
+              keywords: raw.keywords ?? [],
+              license: raw.license ?? ""
             })
           }
         ]

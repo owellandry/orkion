@@ -33,7 +33,15 @@ const FILLER_PATTERNS = [
   /\bpor favor\b/gi,
   /\bme refiero a\b/gi,
   /\bquiero saber\b/gi,
-  /\bnecesito saber\b/gi
+  /\bnecesito saber\b/gi,
+  /\bpuedes (revisar|decirme|explicarme|buscarme|decir|explicar|buscar|contarme|contar)\b/gi,
+  /\bdime\b/gi,
+  /\brevisar\b/gi,
+  /\bse que\b/gi,
+  /\bya se que\b/gi,
+  /\btengo entendido que\b/gi,
+  /\bme puedes (decir|explicar|contar|ayudar)\b/gi,
+  /\bpuedes\b/gi
 ];
 
 function cleanupWhitespace(value: string): string {
@@ -94,6 +102,21 @@ function extractContextHints(goal: string): string[] {
   return [...hints];
 }
 
+// Stopwords that signal the entity name has ended.
+// e.g. "openvite se que es" → stop at "se", entity = "openvite"
+const ENTITY_STOP_RE = /\s+(?:se|que|es|un|una|los|las|pero|por|con|en|sin|como|esto|este|esta|es que|is|a|an|the|but|for|with|and|or|if|when|its)\b/i;
+
+// Common English/Spanish words that should never be an entity
+const COMMON_WORDS = new Set([
+  "puedes", "puede", "quiero", "quiere", "necesito", "necesita",
+  "busca", "busco", "buscar", "revisar", "decir", "decirme", "dime",
+  "explicar", "explicame", "contar", "contarme", "ayuda", "ayudar",
+  "que", "es", "un", "una", "el", "la", "los", "las", "de", "del",
+  "se", "si", "no", "pero", "por", "para", "con", "en", "a", "y", "o",
+  "what", "is", "are", "how", "does", "do", "the", "a", "an", "of",
+  "and", "or", "but", "for", "with", "about", "tell", "me", "can", "you"
+]);
+
 function extractTargetEntity(normalizedGoal: string): string {
   const directUrl = extractUrls(normalizedGoal)[0];
   if (directUrl) {
@@ -104,11 +127,49 @@ function extractTargetEntity(normalizedGoal: string): string {
     }
   }
 
-  const match =
-    normalizedGoal.match(/\b(?:que es|como funciona|framework de|precio del|precio de|informacion sobre|info de)\s+(.+)/i) ??
-    normalizedGoal.match(/\b([a-z0-9][a-z0-9._-]{2,})\b/i);
+  // Match after common phrase starters, but stop at the first stopword
+  const phraseMatch = normalizedGoal.match(
+    /\b(?:que es|como funciona|precio del?|precio de|informacion sobre|info de|what is|how (?:does|do|is)|tell me about)\s+(.+)/i
+  );
 
-  return cleanupWhitespace(match?.[1] ?? normalizedGoal);
+  if (phraseMatch?.[1]) {
+    const tail = phraseMatch[1]
+      .split(",")[0]
+      .split(/\by luego\b/i)[0]
+      .split(/\bpara\b/i)[0]
+      .split(/\bluego\b/i)[0];
+
+    // Stop at the first stopword boundary
+    const stopIdx = tail.search(ENTITY_STOP_RE);
+    const candidate = (stopIdx > 0 ? tail.slice(0, stopIdx) : tail).trim();
+
+    if (candidate.length > 0 && !COMMON_WORDS.has(candidate.toLowerCase())) {
+      return cleanupWhitespace(candidate);
+    }
+  }
+
+  // Look for kebab-case or dotted tech names first (high signal)
+  const kebabMatch = normalizedGoal.match(/\b([a-z][a-z0-9]{1,}-[a-z][a-z0-9]+(?:-[a-z][a-z0-9]+)*)\b/i);
+  if (kebabMatch?.[1] && !COMMON_WORDS.has(kebabMatch[1].toLowerCase())) {
+    return kebabMatch[1];
+  }
+
+  // Look for CamelCase identifiers
+  const camelMatch = normalizedGoal.match(/\b([A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+)\b/);
+  if (camelMatch?.[1]) return camelMatch[1];
+
+  // Fallback: find first token that is not a common word and is >= 3 chars
+  const words = normalizedGoal.split(/\s+/);
+  for (const word of words) {
+    const clean = word.replace(/[^a-z0-9._-]/gi, "");
+    if (clean.length >= 3 && !COMMON_WORDS.has(clean.toLowerCase())) {
+      return clean;
+    }
+  }
+
+  // Last resort
+  const tokenMatch = normalizedGoal.match(/\b([a-z0-9][a-z0-9._-]{2,})\b/i);
+  return cleanupWhitespace(tokenMatch?.[1] ?? normalizedGoal);
 }
 
 export function interpretResearchIntent(goal: string): ResearchIntent {
