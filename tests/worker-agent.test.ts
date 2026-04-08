@@ -276,4 +276,39 @@ describe("WorkerAgent", () => {
     expect(result.queriesTried.every((query) => !query.includes("amigaso"))).toBe(true);
     expect(result.sources.some((source) => source.domain === "npmjs.com" || source.domain === "github.com")).toBe(true);
   });
+
+  test("executes explicit curl requests directly instead of entering research mode", async () => {
+    const worker = new WorkerAgent(() =>
+      createFakeClient(
+        {
+          "curlRequest:https://httpbin.org/get": JSON.stringify({
+            url: "https://httpbin.org/get",
+            effectiveUrl: "https://httpbin.org/get",
+            method: "GET",
+            statusCode: 200,
+            contentType: "application/json",
+            bodyPreview: '{"args":{},"ok":true}'
+          })
+        },
+        ["curlRequest", "fetchWebPage", "searchWeb", "browserStatus"]
+      )
+    );
+
+    const result = await worker.execute(
+      {
+        id: "task-curl",
+        goal: "puedes hacer un curl a esta url https://httpbin.org/get"
+      },
+      plan,
+      {
+        provider: new FakeProvider()
+      }
+    );
+
+    expect(result.status).toBe("success");
+    expect(result.toolCalls.some((call) => call.toolName === "curlRequest")).toBe(true);
+    expect(result.toolCalls.some((call) => call.toolName === "browserStatus")).toBe(false);
+    expect(result.summary).toContain("Status: 200");
+    expect(result.summary).toContain('{"args":{},"ok":true}');
+  });
 });

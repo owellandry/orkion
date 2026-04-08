@@ -60,6 +60,15 @@ interface BrowserInspectResult {
   links?: ExtractedLinkItem[];
 }
 
+interface CurlRequestResult {
+  url?: string;
+  effectiveUrl?: string;
+  method?: string;
+  statusCode?: number;
+  contentType?: string;
+  bodyPreview?: string;
+}
+
 function preview(value: string): string {
   return value.length > 160 ? `${value.slice(0, 157)}...` : value;
 }
@@ -87,6 +96,20 @@ function extractMathExpression(goal: string): string | undefined {
 
 function extractUrls(goal: string): string[] {
   return [...goal.matchAll(/https?:\/\/[^\s)]+/gi)].map((match) => match[0]);
+}
+
+function isDirectCurlRequest(goal: string): boolean {
+  return /\bcurl\b/i.test(goal) && extractUrls(goal).length > 0;
+}
+
+function inferHttpMethod(goal: string): "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" {
+  const lowered = goal.toLowerCase();
+  if (/\bpost\b/.test(lowered)) return "POST";
+  if (/\bput\b/.test(lowered)) return "PUT";
+  if (/\bpatch\b/.test(lowered)) return "PATCH";
+  if (/\bdelete\b/.test(lowered)) return "DELETE";
+  if (/\bhead\b/.test(lowered)) return "HEAD";
+  return "GET";
 }
 
 function unique<T>(values: T[]): T[] {
@@ -220,6 +243,10 @@ function parseNpmPackageInfo(rawText: string): NpmPackageInfo {
 
 function parseBrowserInspectResult(rawText: string): BrowserInspectResult {
   return parseJsonSafely<BrowserInspectResult>(rawText) ?? {};
+}
+
+function parseCurlRequestResult(rawText: string): CurlRequestResult {
+  return parseJsonSafely<CurlRequestResult>(rawText) ?? {};
 }
 
 function buildInitialQueries(intent: ResearchIntent): string[] {
@@ -516,6 +543,73 @@ export class ResearchAgent implements SubAgent {
         detail: "mcp local listo para investigar web"
       });
       const tools = await client.listTools();
+      const directCurlMode = isDirectCurlRequest(executionGoal);
+
+      if (directCurlMode && tools.includes("curlRequest")) {
+        const targetUrl = extractUrls(executionGoal)[0];
+        const method = inferHttpMethod(executionGoal);
+
+        emit(context, "mcp", `Ejecutando curl directo a ${targetUrl}.`, {
+          title: "lyra esta ejecutando curl",
+          detail: `${method} ${shortText(targetUrl)}`
+        });
+
+        const response = await client.callTool("curlRequest", {
+          url: targetUrl,
+          method,
+          maxChars: 12000
+        });
+        toolCalls.push({ toolName: "curlRequest", arguments: { url: targetUrl, method }, resultPreview: preview(response.text) });
+
+        const payload = parseCurlRequestResult(response.text);
+        const source: ResearchSource = {
+          url: payload.effectiveUrl || targetUrl,
+          domain: getDomain(payload.effectiveUrl || targetUrl),
+          kind: "official",
+          title: "Direct curl request"
+        };
+
+        session.visitedUrls.push(payload.effectiveUrl || targetUrl);
+        session.sources.push(source);
+        session.officialSourceFound = true;
+        session.confidence = "high";
+        session.stopReason = "direct_curl_completed";
+        session.roundsCompleted = 1;
+        session.reasoningSummary = `Lyra ejecuto una request HTTP directa con curl (${method}) y obtuvo status ${payload.statusCode ?? 0}.`;
+
+        const summaryParts = [
+          `Request: ${method} ${payload.effectiveUrl || targetUrl}`,
+          payload.statusCode ? `Status: ${payload.statusCode}` : "",
+          payload.contentType ? `Content-Type: ${payload.contentType}` : "",
+          "",
+          payload.bodyPreview?.trim() || "La respuesta no devolvio contenido visible."
+        ].filter(Boolean);
+
+        context?.observer?.({
+          scope: "agent",
+          kind: "done",
+          message: "Lyra termino la request curl.",
+          data: {
+            title: "lyra termino de investigar",
+            detail: `curl listo | status: ${payload.statusCode ?? 0}`
+          }
+        });
+
+        return {
+          status: "success",
+          summary: summaryParts.join("\n"),
+          data: { agentName: this.name, prompt: this.prompt, session, responseMode: "raw_http" },
+          toolCalls,
+          errors: [],
+          confidence: "high",
+          sources: session.sources,
+          queriesTried: [],
+          visitedUrls: session.visitedUrls,
+          officialSourceFound: true,
+          reasoningSummary: session.reasoningSummary
+        };
+      }
+
       if (tools.includes("browserStatus")) {
         const browserStatus = await client.callTool("browserStatus", {}).catch(() => undefined);
         const browserData = browserStatus ? parseJsonSafely<{ available?: boolean; executable?: string }>(browserStatus.text) : undefined;

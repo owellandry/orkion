@@ -168,6 +168,18 @@ function buildExactOperationalAnswer(workerResult: AgentTaskResult): string {
   return workerResult.reasoningSummary.trim();
 }
 
+function shouldReturnExactWorkerSummary(task: TaskRequest, intent: ResearchIntent, workerResult: AgentTaskResult): boolean {
+  if (intent.type === "git_operation") {
+    return true;
+  }
+
+  if (workerResult.data?.responseMode === "raw_http") {
+    return true;
+  }
+
+  return /\bcurl\b/i.test(task.goal);
+}
+
 function sanitizeAssistantText(text: string): string {
   let cleaned = text.trim();
   if (!cleaned) {
@@ -336,7 +348,7 @@ export class ManagerAgent {
       provider
     });
 
-    if (intent.type === "git_operation") {
+    if (shouldReturnExactWorkerSummary(preparedTask, intent, workerResult)) {
       return {
         text: buildExactOperationalAnswer(workerResult),
         delegated: true,

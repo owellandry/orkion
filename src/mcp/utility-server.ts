@@ -33,7 +33,8 @@ export interface CurlExecutionResult {
 export type CurlRunner = (args: string[]) => Promise<CurlExecutionResult>;
 
 async function defaultCurlRunner(args: string[]): Promise<CurlExecutionResult> {
-  const proc = Bun.spawn(["curl", ...args], {
+  const curlBinary = process.platform === "win32" ? "curl.exe" : "curl";
+  const proc = Bun.spawn([curlBinary, ...args], {
     stdout: "pipe",
     stderr: "pipe"
   });
@@ -49,6 +50,41 @@ async function defaultCurlRunner(args: string[]): Promise<CurlExecutionResult> {
     stderr,
     exitCode
   };
+}
+
+interface ParsedCurlMeta {
+  http_code?: string;
+  content_type?: string;
+  url_effective?: string;
+}
+
+function parseCurlResponse(stdout: string): {
+  body: string;
+  meta: ParsedCurlMeta;
+} {
+  const marker = "\n__ORKION_META__";
+  const markerIndex = stdout.lastIndexOf(marker);
+  if (markerIndex === -1) {
+    return {
+      body: stdout,
+      meta: {}
+    };
+  }
+
+  const body = stdout.slice(0, markerIndex);
+  const rawMeta = stdout.slice(markerIndex + marker.length).trim();
+
+  try {
+    return {
+      body,
+      meta: JSON.parse(rawMeta) as ParsedCurlMeta
+    };
+  } catch {
+    return {
+      body,
+      meta: {}
+    };
+  }
 }
 
 function stripHtml(rawHtml: string, maxChars: number): string {
@@ -312,6 +348,59 @@ export function createMcpUtilityServer(curlRunner: CurlRunner = defaultCurlRunne
             text: JSON.stringify({
               url,
               preview: stripHtml(result.stdout, maxChars)
+            })
+          }
+        ]
+      };
+    }
+  );
+
+  const curlRequestSchema = {
+    url: z.string().url().describe("HTTP or HTTPS URL to request with curl."),
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    body: z.string().optional(),
+    maxChars: z.number().int().min(200).max(20000).optional()
+  };
+
+  server.registerTool(
+    "curlRequest",
+    {
+      description: "Runs a direct HTTP request with curl and returns status, content type and body preview.",
+      inputSchema: curlRequestSchema
+    },
+    async ({ url, method = "GET", headers = {}, body, maxChars = 10000 }: z.infer<z.ZodObject<typeof curlRequestSchema>>) => {
+      const args = ["-L", "-sS", "--max-time", "30", "-X", method, "-A", "orkion/0.4", "-H", "Accept: */*"];
+
+      for (const [name, value] of Object.entries(headers)) {
+        args.push("-H", `${name}: ${value}`);
+      }
+
+      if (body && method !== "GET" && method !== "HEAD") {
+        args.push("--data-raw", body);
+      }
+
+      args.push(
+        "-w",
+        "\n__ORKION_META__{\"http_code\":\"%{http_code}\",\"content_type\":\"%{content_type}\",\"url_effective\":\"%{url_effective}\"}\n",
+        url
+      );
+
+      const result = await runCurlJson(curlRunner, args, "Direct curl request failed");
+      const parsed = parseCurlResponse(result.stdout);
+      const bodyPreview = parsed.body.trim().slice(0, maxChars);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              url,
+              effectiveUrl: parsed.meta.url_effective || url,
+              method,
+              statusCode: Number.parseInt(parsed.meta.http_code ?? "0", 10) || 0,
+              contentType: parsed.meta.content_type ?? "",
+              bodyPreview
             })
           }
         ]

@@ -126,6 +126,11 @@ const TOOL_PERMISSIONS: Record<string, Omit<PermissionRequest, "toolName">> = {
     title: "Permiso para consultar npm",
     description: "Lyra quiere usar curl para consultar metadata de un paquete npm."
   },
+  curlRequest: {
+    key: "mcp.curl",
+    title: "Permiso para ejecutar curl directo",
+    description: "Lyra quiere ejecutar una request HTTP directa con curl."
+  },
   browserStatus: {
     key: "mcp.browser",
     title: "Permiso para usar navegador MCP",

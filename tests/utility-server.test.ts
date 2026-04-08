@@ -133,4 +133,43 @@ describe("MCP utility server web tools", () => {
     expect(npmText).toContain('"packageName":"vinext"');
     expect(npmText).toContain('"repositoryUrl":"https://github.com/openvitejs/vinext"');
   });
+
+  test("curlRequest returns status and raw body preview", async () => {
+    const fakeCurl: CurlRunner = async () => ({
+      exitCode: 0,
+      stderr: "",
+      stdout:
+        '{"hello":"world"}\n__ORKION_META__{"http_code":"200","content_type":"application/json","url_effective":"https://httpbin.org/get"}\n'
+    });
+
+    const server = createMcpUtilityServer(fakeCurl);
+    const client = new Client({
+      name: "test-client",
+      version: "1.0.0"
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const result = (await client.callTool(
+      {
+        name: "curlRequest",
+        arguments: {
+          url: "https://httpbin.org/get",
+          method: "GET"
+        }
+      },
+      CallToolResultSchema
+    )) as CallToolResult;
+
+    const text = result.content
+      .filter((item) => item.type === "text")
+      .map((item) => item.text)
+      .join("\n");
+
+    expect(text).toContain('"statusCode":200');
+    expect(text).toContain('"contentType":"application/json"');
+    expect(text).toContain('"bodyPreview":"{\\"hello\\":\\"world\\"}"');
+  });
 });
