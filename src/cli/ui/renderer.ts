@@ -1,78 +1,36 @@
 import type { ExecutionEvent, ManagerExecutionResult } from "../../types/agent.ts";
 import type { CliState } from "../args.ts";
 import { c } from "./colors.ts";
-import { cols, rule, write, cursorUp, clearLine, box } from "./layout.ts";
-
-// Braille spinner — smooth 10-frame cycle
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
-const SPINNER_MS = 80;
-
-function fallbackPhaseTitle(scope: ExecutionEvent["scope"]): string {
-  switch (scope) {
-    case "manager":  return "pensando";
-    case "agent":    return "lyra investigando";
-    case "mcp":      return ""; // MCP events only update the detail line
-    case "provider": return "sintetizando";
-  }
-}
-
-function phaseColor(title: string): string {
-  if (title.includes("lyra") || title.includes("investigando")) return c.brightMagenta;
-  if (title.includes("sinteti"))                                 return c.brightBlue;
-  return c.brightCyan;
-}
-
-function normalizeStatus(event: ExecutionEvent): { title: string; detail: string } {
-  const title  = typeof event.data?.title  === "string" ? event.data.title  : fallbackPhaseTitle(event.scope);
-  const detail = typeof event.data?.detail === "string" ? event.data.detail : event.message;
-  return { title, detail };
-}
-
-function sourceSummary(domains: string[]): string {
-  const counts = new Map<string, number>();
-  for (const d of domains) counts.set(d, (counts.get(d) ?? 0) + 1);
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([d, n]) => (n > 1 ? `${d} ×${n}` : d))
-    .join("  ·  ");
-}
+import { write } from "./layout.ts";
+import { Spinner } from "./components/spinner.ts";
+import { normalizeStatus } from "./components/format.ts";
+import { printSummary, printVerboseEvent } from "./components/summary.ts";
 
 export class ConsoleRenderer {
-  // Streaming state
-  private streaming   = false;
-  private sawStream   = false;
+  private streaming = false;
+  private sawStream = false;
   private atLineStart = true;
-
-  // Status block state (always 2 lines)
-  private statusActive = false;
-  private statusTitle  = "";
-  private statusDetail = "";
-
-  // Spinner
-  private spinnerFrame   = 0;
-  private spinnerTimer?: ReturnType<typeof setInterval>;
+  private spinner = new Spinner();
 
   constructor(private readonly verbose = false) {}
 
   beginTask(goal: string): void {
     write("\n");
-    write(`  ${c.bold}${c.brightCyan}${box.topLeft} you${c.reset}  ${c.gray}${box.horizontal}${c.reset}  ${goal}\n`);
-    write(`  ${c.bold}${c.brightCyan}${box.vertical}${c.reset}\n`);
   }
 
   handle(event: ExecutionEvent): void {
     if (event.kind === "stream") {
-      this._clearStatus();
+      this.spinner.stop();
       if (!this.streaming) {
-        this.streaming   = true;
-        this.sawStream   = true;
+        this.streaming = true;
+        this.sawStream = true;
         this.atLineStart = true;
-        write(this._assistantHeader());
+        write(`  ${c.bold}${c.brightMagenta}orkion${c.reset}\n\n`);
       }
       const chunk = event.chunk ?? "";
       if (chunk) {
-        const prefix = this.atLineStart ? `  ${c.brightCyan}${box.vertical}${c.reset}  ` : "";
-        write(prefix + chunk.replace(/\n(?!$)/g, `\n  ${c.brightCyan}${box.vertical}${c.reset}  `));
+        const prefix = this.atLineStart ? "  " : "";
+        write(prefix + chunk.replace(/\n(?!$)/g, "\n  "));
         this.atLineStart = chunk.endsWith("\n");
       }
       return;
@@ -80,55 +38,52 @@ export class ConsoleRenderer {
 
     if (this.streaming) {
       if (!this.atLineStart) write("\n");
-      write(this._assistantFooter());
       this.streaming = false;
     }
 
     if (event.kind === "error") {
-      this._clearStatus();
-      write(`  ${c.brightCyan}${box.leftCross}${c.reset}${box.horizontal}${c.brightRed}✗${c.reset}  ${c.bold}${c.red}error${c.reset}  ${c.dim}${event.message}${c.reset}\n\n`);
+      this.spinner.stop();
+      write(`  ${c.brightRed}✗ error${c.reset} ${c.dim}${event.message}${c.reset}\n\n`);
       return;
     }
 
     if (event.kind === "done") {
-      this._stopSpinner();
+      this.spinner.stop();
       return;
     }
 
     if (this.verbose) {
-      this._clearStatus();
-      this._printVerbose(event);
+      this.spinner.stop();
+      printVerboseEvent(event);
       return;
     }
 
     const { title, detail } = normalizeStatus(event);
 
     if (!title) {
-      if (this.statusActive) this._updateStatus(this.statusTitle, detail);
+      this.spinner.update("", detail);
       return;
     }
 
-    this._updateStatus(title, detail);
+    this.spinner.start(title, detail);
   }
 
   finish(result: ManagerExecutionResult, state: CliState): void {
-    this._clearStatus();
+    this.spinner.stop();
 
     if (this.streaming) {
       if (!this.atLineStart) write("\n");
-      write(this._assistantFooter());
       this.streaming = false;
     }
 
     if (!this.sawStream && result.text.trim()) {
-      write(this._assistantHeader());
-      write(`  ${c.brightCyan}${box.vertical}${c.reset}  ${result.text.trim().split("\n").join(`\n  ${c.brightCyan}${box.vertical}${c.reset}  `)}\n`);
-      write(this._assistantFooter());
+      write(`  ${c.bold}${c.brightMagenta}orkion${c.reset}\n\n`);
+      write(`  ${result.text.trim().split("\n").join("\n  ")}\n`);
     }
 
     if (!result.text.trim() && !this.sawStream) {
-      write(`  ${c.brightCyan}${box.vertical}${c.reset}  ${c.gray}◆  Sin respuesta generada.${c.reset}\n`);
-      write(this._assistantFooter());
+      write(`  ${c.bold}${c.brightMagenta}orkion${c.reset}\n\n`);
+      write(`  ${c.gray}No response generated.${c.reset}\n`);
     }
 
     if (state.json) {
@@ -136,103 +91,6 @@ export class ConsoleRenderer {
       return;
     }
 
-    this._printSummary(result);
-  }
-
-  private _assistantHeader(): string {
-    const title = ` assistant `;
-    return `  ${c.bold}${c.brightCyan}${box.leftCross}${box.horizontal}${c.reset}${c.bold}${c.brightWhite}${title}${c.reset}\n`;
-  }
-
-  private _assistantFooter(): string {
-    return `  ${c.bold}${c.brightCyan}${box.bottomLeft}${box.horizontal}${c.reset}\n`;
-  }
-
-  private _startSpinner(): void {
-    if (this.spinnerTimer) return;
-    this.spinnerTimer = setInterval(() => {
-      this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
-      if (this.statusActive) this._redrawStatus();
-    }, SPINNER_MS);
-  }
-
-  private _stopSpinner(): void {
-    if (this.spinnerTimer) {
-      clearInterval(this.spinnerTimer);
-      this.spinnerTimer = undefined;
-    }
-  }
-
-  private _updateStatus(title: string, detail: string): void {
-    this.statusTitle  = title;
-    this.statusDetail = detail;
-    this._startSpinner();
-    this._redrawStatus();
-  }
-
-  private _redrawStatus(): void {
-    if (!this.statusActive && this.statusTitle === "") return;
-
-    const frame = SPINNER_FRAMES[this.spinnerFrame];
-    const color = phaseColor(this.statusTitle);
-
-    const line1 = `  ${c.brightCyan}${box.vertical}${c.reset}  ${color}${frame}${c.reset}  ${c.bold}${this.statusTitle}${c.reset}`;
-    const line2 = `  ${c.brightCyan}${box.vertical}${c.reset}     ${c.dim}${this.statusDetail}${c.reset}`;
-
-    if (this.statusActive) {
-      cursorUp(2);
-    }
-
-    clearLine(); write(line1 + "\n");
-    clearLine(); write(line2 + "\n");
-
-    this.statusActive = true;
-  }
-
-  private _clearStatus(): void {
-    if (!this.statusActive) return;
-    this.statusActive = false;
-    this._stopSpinner();
-    cursorUp(2);
-    clearLine(); write("\n");
-    clearLine(); write("\n");
-    cursorUp(2);
-    this.statusTitle  = "";
-    this.statusDetail = "";
-  }
-
-  private _printVerbose(event: ExecutionEvent): void {
-    const scopeColors: Record<string, string> = { manager: c.cyan, agent: c.magenta, mcp: c.yellow, provider: c.blue };
-    const scopeNames: Record<string, string> = { manager: "manager", agent: "lyra", mcp: "mcp", provider: "model" };
-    const icon = event.kind === "done" ? `${c.brightGreen}✓${c.reset}` : event.kind === "error" ? `${c.brightRed}✗${c.reset}` : `${c.gray}◆${c.reset}`;
-    const color = scopeColors[event.scope] ?? c.gray;
-    const name  = (scopeNames[event.scope] ?? event.scope).padEnd(7);
-
-    write(`  ${c.brightCyan}${box.vertical}${c.reset}  ${icon} ${c.bold}${color}${name}${c.reset}  ${c.dim}${event.message}${c.reset}\n`);
-  }
-
-  private _printSummary(result: ManagerExecutionResult): void {
-    const workerStatus = result.workerResult?.status;
-    const confidence   = result.workerResult?.confidence;
-    const toolCount    = result.workerResult?.toolCalls.length ?? 0;
-    const domains      = result.workerResult?.sources.map((s) => s.domain) ?? [];
-
-    const statusBadge = workerStatus === "success" ? `${c.brightGreen}✓ éxito${c.reset}` : workerStatus === "error" ? `${c.brightRed}✗ error${c.reset}` : "";
-    const confidenceBadge = confidence === "high" ? `${c.brightGreen}alta${c.reset}` : confidence === "medium" ? `${c.brightYellow}media${c.reset}` : confidence === "low" ? `${c.yellow}baja${c.reset}` : "";
-    const sep = `  ${c.gray}·${c.reset}  `;
-
-    const parts: string[] = [ `${c.gray}${result.plan.provider}${c.reset}`, `${c.dim}${result.plan.model}${c.reset}` ];
-    if (toolCount > 0) parts.push(`${c.gray}${toolCount} herr.${c.reset}`);
-    if (statusBadge) parts.push(statusBadge);
-    if (confidenceBadge) parts.push(`confianza ${confidenceBadge}`);
-    if (result.plan.warnings.length > 0) parts.push(`${c.yellow}⚠ ${result.plan.warnings.join(" · ")}${c.reset}`);
-
-    write(`\n  ${parts.join(sep)}\n`);
-
-    if (domains.length > 0 && confidence !== "high") {
-      write(`\n  ${c.gray}fuentes${c.reset}  ${c.dim}${sourceSummary(domains)}${c.reset}\n`);
-    }
-
-    write("\n");
+    printSummary(result);
   }
 }

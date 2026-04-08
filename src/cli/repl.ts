@@ -13,7 +13,7 @@ export async function runInteractive(state: CliState): Promise<void> {
 
   try {
     while (true) {
-      const line = (await rl.question(`  ${c.brightCyan}╭─${c.bold} you${c.reset}\n  ${c.brightCyan}╰─► ${c.reset}`)).trim();
+      const line = (await rl.question(`  ${c.brightCyan}?${c.reset} ${c.bold}What would you like to do?${c.reset} `)).trim();
       if (!line) {
         continue;
       }
