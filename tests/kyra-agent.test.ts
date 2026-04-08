@@ -30,12 +30,18 @@ class FakeProvider implements LLMProvider {
 
   async generateText(_request: GenerateTextRequest): Promise<GenerateTextResult> {
     return {
-      text: "Refine intent handling and git workflow"
+      text: JSON.stringify({
+        subject: "feat: improve intent handling and git workflow",
+        body: "Refina la deteccion de tareas Git y mejora la generacion de commits para que el flujo sea mas confiable."
+      })
     };
   }
 
   async streamText(request: GenerateTextRequest): Promise<GenerateTextResult> {
-    const text = "Refine intent handling and git workflow";
+    const text = JSON.stringify({
+      subject: "feat: improve intent handling and git workflow",
+      body: "Refina la deteccion de tareas Git y mejora la generacion de commits para que el flujo sea mas confiable."
+    });
     request.onToken?.(text);
     return { text };
   }
@@ -95,9 +101,9 @@ describe("KyraAgent", () => {
           stdout: " src/agents/intent-agent.ts | 22 ++++++++++++++------\n src/agents/manager-agent.ts | 18 ++++++++++----\n 2 files changed, 28 insertions(+), 12 deletions(-)",
           stderr: ""
         }),
-        'gitExec:git commit -m "Refine intent handling and git workflow"': JSON.stringify({
+        'gitExec:git commit -m "feat: improve intent handling and git workflow" -m "Refina la deteccion de tareas Git y mejora la generacion de commits para que el flujo sea mas confiable."': JSON.stringify({
           success: true,
-          stdout: "[feature/research abc1234] Refine intent handling and git workflow",
+          stdout: "[feature/research abc1234] feat: improve intent handling and git workflow",
           stderr: ""
         }),
         "gitExec:git push -u origin HEAD": JSON.stringify({
@@ -120,8 +126,9 @@ describe("KyraAgent", () => {
     );
 
     expect(result.status).toBe("success");
-    expect(result.summary).toContain("Refine intent handling and git workflow");
-    expect(result.toolCalls.some((call) => String(call.arguments.command).includes('git commit -m "Refine intent handling and git workflow"'))).toBe(true);
+    expect(result.summary).toContain("feat: improve intent handling and git workflow");
+    expect(result.summary).toContain("Descripcion:");
+    expect(result.toolCalls.some((call) => String(call.arguments.command).includes('git commit -m "feat: improve intent handling and git workflow" -m "Refina la deteccion de tareas Git y mejora la generacion de commits para que el flujo sea mas confiable."'))).toBe(true);
     expect(result.toolCalls.some((call) => String(call.arguments.command).includes("git push -u origin HEAD"))).toBe(true);
   });
 

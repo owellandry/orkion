@@ -38,6 +38,11 @@ interface RepoSnapshot {
   rawStatus: string;
 }
 
+interface CommitMessageParts {
+  subject: string;
+  body?: string;
+}
+
 const COMMIT_PATTERN = /\bcomm?it(?:ear|ea|eando|eado|eados|eadas)?\b/i;
 
 function emit(
@@ -78,6 +83,18 @@ function sanitizeCommitMessage(message: string): string {
     .slice(0, 72);
 }
 
+function sanitizeCommitBody(message: string): string {
+  return message
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/"/g, "")
+    .trim()
+    .slice(0, 220);
+}
+
 function isGenericCommitMessage(message: string): boolean {
   const normalized = message.toLowerCase().trim();
   return [
@@ -111,6 +128,23 @@ function buildFallbackCommitMessage(files: string[], diffStat: string): string {
   }
 
   return "Refine agent runtime behavior";
+}
+
+function buildFallbackCommitBody(files: string[], diffStat: string): string {
+  const areas = new Set<string>();
+
+  if (files.some((file) => file.includes("cli"))) areas.add("mejora el flujo del CLI");
+  if (files.some((file) => file.includes("permission"))) areas.add("integra permisos persistentes");
+  if (files.some((file) => file.includes("runtime"))) areas.add("ajusta la integracion del runtime");
+  if (files.some((file) => file.includes("mcp"))) areas.add("refuerza la capa MCP");
+  if (files.some((file) => file.includes(".test.")) || /files changed/i.test(diffStat)) areas.add("actualiza la cobertura de pruebas");
+
+  const summary = [...areas].join(", ");
+  if (summary) {
+    return `Este cambio ${summary} y deja el flujo mas consistente para las tareas recientes.`;
+  }
+
+  return "Este cambio organiza las modificaciones recientes y deja una base mas consistente para el siguiente paso del proyecto.";
 }
 
 function parseRepoSnapshot(statusOutput: string): RepoSnapshot {
@@ -166,6 +200,45 @@ async function runGitCommand(
   return parsed;
 }
 
+function parseCommitMessageResponse(rawText: string): CommitMessageParts | undefined {
+  const cleaned = rawText
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned) as { subject?: string; body?: string };
+    if (parsed.subject?.trim()) {
+      return {
+        subject: sanitizeCommitMessage(parsed.subject),
+        body: parsed.body ? sanitizeCommitBody(parsed.body) : undefined
+      };
+    }
+  } catch {
+    // fall through to text parsing
+  }
+
+  const lines = cleaned
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  const subjectLine = lines.find((line) => /^subject\s*:/i.test(line)) ?? lines[0];
+  const bodyLine = lines.find((line) => /^body\s*:/i.test(line));
+  const subject = sanitizeCommitMessage(subjectLine.replace(/^subject\s*:/i, "").trim());
+  const body = bodyLine ? sanitizeCommitBody(bodyLine.replace(/^body\s*:/i, "").trim()) : undefined;
+
+  if (!subject) {
+    return undefined;
+  }
+
+  return { subject, body };
+}
+
 async function generateCommitMessage(
   provider: AgentExecutionContext["provider"],
   plan: DelegationPlan,
@@ -173,23 +246,28 @@ async function generateCommitMessage(
   snapshot: RepoSnapshot,
   diffNameStatus: string,
   diffStat: string
-): Promise<string> {
+): Promise<CommitMessageParts> {
   if (!provider) {
-    return buildFallbackCommitMessage(snapshot.changedFiles, diffStat);
+    return {
+      subject: buildFallbackCommitMessage(snapshot.changedFiles, diffStat),
+      body: buildFallbackCommitBody(snapshot.changedFiles, diffStat)
+    };
   }
 
   const response = await provider.generateText({
     model: plan.model,
     temperature: 0.1,
-    maxTokens: 80,
+    maxTokens: 180,
     systemPrompt: [
       "You are Kyra, generating a git commit message.",
-      "Write one git commit message line only.",
+      "Write a conventional commit subject and a short descriptive body.",
       "Be specific, concise, and professional.",
       "Do not use generic messages like update files or misc changes.",
       "Prefer imperative mood.",
-      "Return ONLY the commit message, no quotes, no bullets, no json, no reasoning.",
-      "Remember: the commit message MUST be clean and follow conventional commits (feat:, fix:, chore:, refactor:, docs:, style:, test:)."
+      "Return either JSON with keys subject and body, or plain text lines starting with Subject: and Body:.",
+      "The subject must follow conventional commits (feat:, fix:, chore:, refactor:, docs:, style:, test:).",
+      "The body should explain the main technical changes in one or two sentences.",
+      "Do not include reasoning or extra commentary."
     ].join(" "),
     prompt: [
       `User request: ${task.goal}`,
@@ -202,9 +280,12 @@ async function generateCommitMessage(
     ].join("\n")
   });
 
-  const candidate = sanitizeCommitMessage(response.text);
-  if (!candidate || isGenericCommitMessage(candidate)) {
-    return buildFallbackCommitMessage(snapshot.changedFiles, diffStat);
+  const candidate = parseCommitMessageResponse(response.text);
+  if (!candidate?.subject || isGenericCommitMessage(candidate.subject)) {
+    return {
+      subject: buildFallbackCommitMessage(snapshot.changedFiles, diffStat),
+      body: buildFallbackCommitBody(snapshot.changedFiles, diffStat)
+    };
   }
 
   return candidate;
@@ -277,7 +358,7 @@ export class GitAgent implements SubAgent {
         };
       }
 
-      let commitMessage = "";
+      let commitMessage: CommitMessageParts | undefined;
       let commitSummary = "";
       let pushSummary = "";
 
@@ -304,11 +385,14 @@ export class GitAgent implements SubAgent {
           diffStat.stdout ?? ""
         );
 
-        emit(context, "mcp", `Creando commit: ${commitMessage}`, {
+        emit(context, "mcp", `Creando commit: ${commitMessage.subject}`, {
           title: "kyra esta ejecutando",
-          detail: shortText(commitMessage)
+          detail: shortText(commitMessage.subject)
         });
-        const commitResult = await runGitCommand(client, toolCalls, `git commit -m "${commitMessage}"`);
+        const commitCommand = commitMessage.body
+          ? `git commit -m "${commitMessage.subject}" -m "${commitMessage.body}"`
+          : `git commit -m "${commitMessage.subject}"`;
+        const commitResult = await runGitCommand(client, toolCalls, commitCommand);
         commitSummary = extractCommitSummary(commitResult.stdout ?? "");
       }
 
@@ -322,7 +406,8 @@ export class GitAgent implements SubAgent {
       }
 
       const finalSummaryParts = [
-        commitMessage ? `Commit creado: ${commitMessage}.` : "",
+        commitMessage ? `Commit creado: ${commitMessage.subject}.` : "",
+        commitMessage?.body ? `Descripcion: ${commitMessage.body}.` : "",
         commitSummary ? `Resultado del commit: ${commitSummary}.` : "",
         pushSummary ? `Push realizado: ${pushSummary}.` : "",
         !needsPush && !needsCommit ? "Kyra inspecciono el estado del repo y no realizo cambios." : ""
