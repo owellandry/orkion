@@ -19,6 +19,7 @@ Secrets soportados:
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `XAI_API_KEY`
+- `GROQ_API_KEY`
 
 Overrides opcionales de modelo:
 
@@ -26,6 +27,7 @@ Overrides opcionales de modelo:
 - `OPENAI_MODEL`
 - `ANTHROPIC_MODEL`
 - `XAI_MODEL`
+- `GROQ_MODEL`
 
 ## Comandos
 
@@ -54,12 +56,14 @@ bun run start --provider=openrouter "Busca informacion sobre MCP y arma un repor
 Overrides disponibles:
 
 - `--provider=openrouter`
+- `--provider=groq`
 - `--model=meta-llama/llama-3.3-8b-instruct:free`
 - `--json`
 
 Comandos interactivos:
 
 - `/provider openrouter`
+- `/provider groq`
 - `/model meta-llama/llama-3.3-8b-instruct:free`
 - `/json on`
 - `/exit`

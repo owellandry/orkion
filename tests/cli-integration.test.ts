@@ -33,7 +33,7 @@ const fakeFactory: ProviderFactory = () => new IntegrationFakeProvider();
 
 const config: OrkionConfig = {
   defaultProvider: "openrouter",
-  providerPriority: ["openrouter", "openai", "anthropic", "xai"],
+  providerPriority: ["openrouter", "openai", "anthropic", "xai", "groq"],
   providers: {
     openrouter: {
       enabled: true,
@@ -55,6 +55,11 @@ const config: OrkionConfig = {
       enabled: false,
       defaultModel: "grok-3-mini",
       fallbackModel: "grok-3-mini"
+    },
+    groq: {
+      enabled: false,
+      defaultModel: "llama-3.3-70b-versatile",
+      fallbackModel: "llama-3.1-8b-instant"
     }
   }
 };

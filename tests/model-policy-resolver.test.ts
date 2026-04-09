@@ -7,7 +7,7 @@ import { ProviderRegistry } from "../src/providers/provider-registry.ts";
 
 const baseConfig: OrkionConfig = {
   defaultProvider: "openrouter",
-  providerPriority: ["openrouter", "openai", "anthropic", "xai"],
+  providerPriority: ["openrouter", "openai", "anthropic", "xai", "groq"],
   providers: {
     openrouter: {
       enabled: true,
@@ -29,6 +29,11 @@ const baseConfig: OrkionConfig = {
       enabled: true,
       defaultModel: "grok-3-mini",
       fallbackModel: "grok-3-mini"
+    },
+    groq: {
+      enabled: true,
+      defaultModel: "llama-3.3-70b-versatile",
+      fallbackModel: "llama-3.1-8b-instant"
     }
   }
 };
@@ -36,7 +41,9 @@ const baseConfig: OrkionConfig = {
 afterEach(() => {
   delete process.env.OPENROUTER_API_KEY;
   delete process.env.OPENAI_API_KEY;
+  delete process.env.GROQ_API_KEY;
   process.env.OPENROUTER_MODEL = "";
+  process.env.GROQ_MODEL = "";
 });
 
 function createResolver(config: OrkionConfig = baseConfig): ModelPolicyResolver {
@@ -80,6 +87,31 @@ describe("ModelPolicyResolver", () => {
 
     expect(selection.provider).toBe("openai");
     expect(selection.fallbackUsed).toBe(true);
+  });
+
+  test("selects Groq when it is the available fallback provider", () => {
+    process.env.GROQ_API_KEY = "groq-key";
+    process.env.GROQ_MODEL = "";
+    const resolver = createResolver();
+
+    const selection = resolver.resolve();
+
+    expect(selection.provider).toBe("groq");
+    expect(selection.model).toBe("llama-3.3-70b-versatile");
+    expect(selection.fallbackUsed).toBe(true);
+  });
+
+  test("respects GROQ_MODEL env override", () => {
+    process.env.GROQ_API_KEY = "groq-key";
+    process.env.GROQ_MODEL = "openai/gpt-oss-20b";
+    const resolver = createResolver();
+
+    const selection = resolver.resolve({
+      preferredProvider: "groq"
+    });
+
+    expect(selection.provider).toBe("groq");
+    expect(selection.model).toBe("openai/gpt-oss-20b");
   });
 
   test("throws a clear error when no provider credentials are available", () => {

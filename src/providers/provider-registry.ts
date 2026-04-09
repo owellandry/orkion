@@ -10,7 +10,8 @@ export type ProviderFactory = (provider: ProviderName, apiKey: string) => LLMPro
 const PROVIDER_BASE_URLS: Record<Exclude<ProviderName, "anthropic">, string> = {
   openrouter: "https://openrouter.ai/api/v1",
   openai: "https://api.openai.com/v1",
-  xai: "https://api.x.ai/v1"
+  xai: "https://api.x.ai/v1",
+  groq: "https://api.groq.com/openai/v1"
 };
 
 export function createDefaultProviderFactory(): ProviderFactory {

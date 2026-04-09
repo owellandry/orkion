@@ -5,13 +5,15 @@ export interface ProviderCredentials {
   openai?: string;
   anthropic?: string;
   xai?: string;
+  groq?: string;
 }
 
 const PROVIDER_ENV_MAP: Record<ProviderName, string> = {
   openrouter: "OPENROUTER_API_KEY",
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
-  xai: "XAI_API_KEY"
+  xai: "XAI_API_KEY",
+  groq: "GROQ_API_KEY"
 };
 
 function readEnv(name: string): string | undefined {
@@ -26,7 +28,8 @@ export class CredentialResolver {
       openrouter: readEnv(PROVIDER_ENV_MAP.openrouter),
       openai: readEnv(PROVIDER_ENV_MAP.openai),
       anthropic: readEnv(PROVIDER_ENV_MAP.anthropic),
-      xai: readEnv(PROVIDER_ENV_MAP.xai)
+      xai: readEnv(PROVIDER_ENV_MAP.xai),
+      groq: readEnv(PROVIDER_ENV_MAP.groq)
     };
   }
 

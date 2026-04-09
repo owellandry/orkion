@@ -1,4 +1,4 @@
-export type ProviderName = "openrouter" | "openai" | "anthropic" | "xai";
+export type ProviderName = "openrouter" | "openai" | "anthropic" | "xai" | "groq";
 
 export interface ProviderConfig {
   enabled: boolean;
