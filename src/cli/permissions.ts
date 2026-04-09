@@ -22,16 +22,15 @@ function normalizeDecision(answer: string): PermissionDecision | undefined {
 
 function buildPermissionLines(request: PermissionRequest, selectedIndex: number): string[] {
   return [
-    `${theme.bar}`,
-    `${theme.bar}  ${c.bold}${c.brightYellow}permiso${c.reset} ${c.gray}|${c.reset} ${c.brightWhite}${request.title}${c.reset}`,
-    `${theme.bar}  ${c.dim}${request.description}${c.reset}`,
+    `  ${c.bold}${c.brightYellow}permiso${c.reset} ${c.gray}|${c.reset} ${c.brightWhite}${request.title}${c.reset}`,
+    `  ${c.dim}${request.description}${c.reset}`,
     ...PERMISSION_OPTIONS.map((option, index) => {
       const active = index === selectedIndex;
-      const marker = active ? `${c.brightCyan}>${c.reset}` : `${c.gray} ${c.reset}`;
+      const marker = active ? `${theme.arrow}` : `${c.gray} ${c.reset}`;
       const label = active ? `${c.bold}${c.brightWhite}${option.label}${c.reset}` : `${c.dim}${option.label}${c.reset}`;
-      return `${theme.bar}  ${marker} ${label}`;
+      return `  ${marker} ${label}`;
     }),
-    `${theme.bar}  ${c.dim}usa flechas arriba/abajo y Enter para confirmar${c.reset}`
+    `  ${c.dim}usa flechas arriba/abajo y Enter para confirmar${c.reset}`
   ];
 }
 
@@ -122,19 +121,19 @@ export function createPermissionPrompter(rl: Interface): PermissionPrompter {
       }
 
       while (true) {
-        write(`${theme.bar}\n`);
-        write(`${theme.bar}  ${c.bold}${c.brightYellow}permiso${c.reset} ${c.gray}|${c.reset} ${c.brightWhite}${request.title}${c.reset}\n`);
-        write(`${theme.bar}  ${c.dim}${request.description}${c.reset}\n`);
-        write(`${theme.bar}  ${c.gray}1${c.reset} ${c.dim}si${c.reset}\n`);
-        write(`${theme.bar}  ${c.gray}2${c.reset} ${c.dim}si, no volver a preguntar${c.reset}\n`);
-        write(`${theme.bar}  ${c.gray}3${c.reset} ${c.dim}no${c.reset}\n`);
-        const answer = await rl.question(`${theme.bar}  ${theme.arrow} `);
+        write(`\n`);
+        write(`  ${c.bold}${c.brightYellow}permiso${c.reset} ${c.gray}|${c.reset} ${c.brightWhite}${request.title}${c.reset}\n`);
+        write(`  ${c.dim}${request.description}${c.reset}\n`);
+        write(`  ${c.gray}1${c.reset} ${c.dim}si${c.reset}\n`);
+        write(`  ${c.gray}2${c.reset} ${c.dim}si, no volver a preguntar${c.reset}\n`);
+        write(`  ${c.gray}3${c.reset} ${c.dim}no${c.reset}\n`);
+        const answer = await rl.question(`  ${theme.arrow} `);
         const decision = normalizeDecision(answer);
         if (decision) {
           return decision;
         }
 
-        write(`${theme.bar}  ${c.brightRed}Opcion invalida.${c.reset} ${c.dim}Elige 1, 2 o 3.${c.reset}\n`);
+        write(`  ${c.brightRed}Opcion invalida.${c.reset} ${c.dim}Elige 1, 2 o 3.${c.reset}\n`);
       }
     }
   };

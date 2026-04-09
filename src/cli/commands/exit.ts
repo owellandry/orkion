@@ -7,7 +7,7 @@ export const exitCommand: Command = {
   name: "/exit",
   description: "Exit the REPL",
   execute() {
-    write(`${theme.bar}\n${theme.end}  ${c.dim}¡Hasta luego!${c.reset}\n\n`);
+    write(`\n  ${c.dim}¡Hasta luego!${c.reset}\n\n`);
     process.exit(0);
   }
 };

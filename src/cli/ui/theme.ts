@@ -1,12 +1,12 @@
 import { c } from "./colors.ts";
 
 export const theme = {
-  bar: `${c.gray}│${c.reset}`,
-  start: `${c.gray}┌${c.reset}`,
-  end: `${c.gray}└${c.reset}`,
-  step: `${c.brightCyan}◇${c.reset}`,
-  active: `${c.brightCyan}◆${c.reset}`,
-  success: `${c.brightGreen}◼${c.reset}`,
-  error: `${c.brightRed}▲${c.reset}`,
-  arrow: `${c.brightCyan}❯${c.reset}`,
+  prompt: `${c.brightGreen}➜${c.reset}`,
+  agent: `${c.brightMagenta}✦${c.reset}`,
+  success: `${c.brightGreen}✔${c.reset}`,
+  error: `${c.brightRed}✖${c.reset}`,
+  info: `${c.brightBlue}ℹ${c.reset}`,
+  bullet: `${c.gray}•${c.reset}`,
+  arrow: `${c.gray}→${c.reset}`,
+  spinner: [`⠋`, `⠙`, `⠹`, `⠸`, `⠼`, `⠴`, `⠦`, `⠧`, `⠇`, `⠏`],
 };

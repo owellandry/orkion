@@ -4,7 +4,7 @@ import { c } from "./colors.ts";
 import { write } from "./layout.ts";
 import { Spinner } from "./components/spinner.ts";
 import { normalizeStatus } from "./components/format.ts";
-import { printVerboseEvent } from "./components/summary.ts";
+import { printSummary, printVerboseEvent } from "./components/summary.ts";
 import { theme } from "./theme.ts";
 
 export class ConsoleRenderer {
@@ -16,7 +16,9 @@ export class ConsoleRenderer {
   constructor(private readonly verbose = false) {}
 
   beginTask(goal: string): void {
-    // Si viene de args es util, si no es REPL, mantenemos limpio
+    if (!this.verbose) {
+      write("\n");
+    }
   }
 
   handle(event: ExecutionEvent): void {
@@ -26,13 +28,12 @@ export class ConsoleRenderer {
         this.streaming = true;
         this.sawStream = true;
         this.atLineStart = true;
-        write(`${theme.bar}\n`);
-        write(`${theme.bar}  ${c.bold}${c.brightMagenta}orkion${c.reset}\n`);
+        write(`  ${theme.agent}  ${c.bold}${c.brightMagenta}Orkion${c.reset}\n\n`);
       }
       const chunk = event.chunk ?? "";
       if (chunk) {
-        const prefix = this.atLineStart ? `${theme.bar}  ` : "";
-        write(prefix + chunk.replace(/\n(?!$)/g, `\n${theme.bar}  `));
+        const prefix = this.atLineStart ? `    ` : "";
+        write(prefix + chunk.replace(/\n(?!$)/g, `\n    `));
         this.atLineStart = chunk.endsWith("\n");
       }
       return;
@@ -45,8 +46,7 @@ export class ConsoleRenderer {
 
     if (event.kind === "error") {
       this.spinner.stop();
-      write(`${theme.bar}\n`);
-      write(`${theme.bar}  ${theme.error} ${c.brightRed}error${c.reset} ${c.dim}${event.message}${c.reset}\n`);
+      write(`\n  ${theme.error}  ${c.brightRed}error${c.reset} ${c.dim}${event.message}${c.reset}\n`);
       return;
     }
 
@@ -80,20 +80,20 @@ export class ConsoleRenderer {
     }
 
     if (!this.sawStream && result.text.trim()) {
-      write(`${theme.bar}\n`);
-      write(`${theme.bar}  ${c.bold}${c.brightMagenta}orkion${c.reset}\n`);
-      write(`${theme.bar}  ${result.text.trim().split("\n").join(`\n${theme.bar}  `)}\n`);
+      write(`  ${theme.agent}  ${c.bold}${c.brightMagenta}Orkion${c.reset}\n\n`);
+      write(`    ${result.text.trim().split("\n").join(`\n    `)}\n`);
     }
 
     if (!result.text.trim() && !this.sawStream) {
-      write(`${theme.bar}\n`);
-      write(`${theme.bar}  ${c.bold}${c.brightMagenta}orkion${c.reset}\n`);
-      write(`${theme.bar}  ${c.gray}No se generó respuesta.${c.reset}\n`);
+      write(`  ${theme.agent}  ${c.bold}${c.brightMagenta}Orkion${c.reset}\n\n`);
+      write(`    ${c.gray}No se generó respuesta.${c.reset}\n`);
     }
 
     if (state.json) {
       write("\n" + JSON.stringify(result, null, 2) + "\n");
       return;
     }
+
+    printSummary(result);
   }
 }
