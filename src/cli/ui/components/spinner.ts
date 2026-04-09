@@ -50,8 +50,8 @@ export class Spinner {
     const line = `  ${color}${frame}${c.reset}  ${c.bold}${this.title}${c.reset}${detailPart}`;
 
     if (this.active) {
-      clearLine();
-      write(line);
+      // Usamos \r para sobreescribir la misma línea en lugar de clearLine(), esto evita el parpadeo en algunas terminales.
+      write(`\r\x1b[K${line}`);
       return;
     }
 

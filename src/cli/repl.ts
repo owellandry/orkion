@@ -15,8 +15,16 @@ export async function runInteractive(state: CliState): Promise<void> {
   printWelcome();
 
   try {
+    let firstTurn = true;
+    
     while (true) {
-      const line = (await rl.question(`\n  ${theme.prompt}  ${c.bold}¿Qué te gustaría hacer?${c.reset}\n  ${theme.arrow}  `)).trim();
+      const promptText = firstTurn 
+        ? `\n  ${theme.prompt}  ${c.bold}¿En qué puedo ayudarte?${c.reset}\n  ${theme.arrow}  ` 
+        : `\n  ${theme.prompt}  `;
+      
+      const line = (await rl.question(promptText)).trim();
+      firstTurn = false;
+      
       if (!line) {
         continue;
       }

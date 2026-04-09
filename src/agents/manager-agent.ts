@@ -429,10 +429,9 @@ export class ManagerAgent {
       input.observer?.({
         scope: "provider",
         kind: "status",
-        message: `Solicitando respuesta al modelo ${input.plan.model}.`,
+        message: `Generando respuesta...`,
         data: {
-          title: "sintetizando respuesta",
-          detail: `provider: ${input.plan.provider} | model: ${input.plan.model}`
+          title: "sintetizando respuesta"
         }
       });
 

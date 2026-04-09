@@ -24,13 +24,15 @@ export function printSummary(result: ManagerExecutionResult): void {
   const confidenceBadge = confidence === "high" ? `${c.brightGreen}alta${c.reset}` : confidence === "medium" ? `${c.brightYellow}media${c.reset}` : confidence === "low" ? `${c.yellow}baja${c.reset}` : "";
   const sep = `  ${c.gray}·${c.reset}  `;
 
-  const parts: string[] = [ `${c.gray}${result.plan.provider}${c.reset}`, `${c.dim}${result.plan.model}${c.reset}` ];
+  const parts: string[] = [];
   if (toolCount > 0) parts.push(`${c.gray}${toolCount} herr.${c.reset}`);
   if (statusBadge) parts.push(statusBadge);
   if (confidenceBadge) parts.push(`confianza ${confidenceBadge}`);
   if (result.plan.warnings.length > 0) parts.push(`${c.yellow}⚠ ${result.plan.warnings.join(" · ")}${c.reset}`);
 
-  write(`\n  ${parts.join(sep).trim()}\n`);
+  if (parts.length > 0) {
+    write(`\n  ${parts.join(sep).trim()}\n`);
+  }
 
   if (domains.length > 0 && confidence !== "high") {
     write(`  ${theme.bullet} ${c.gray}fuentes${c.reset}  ${c.dim}${sourceSummary(domains)}${c.reset}\n`);
