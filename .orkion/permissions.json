@@ -4,6 +4,14 @@
     "git.exec": {
       "allowed": true,
       "updatedAt": "2026-04-08T21:34:16.146Z"
+    },
+    "system.info": {
+      "allowed": true,
+      "updatedAt": "2026-04-08T22:38:42.416Z"
+    },
+    "system.command": {
+      "allowed": true,
+      "updatedAt": "2026-04-08T22:38:46.896Z"
     }
   }
 }

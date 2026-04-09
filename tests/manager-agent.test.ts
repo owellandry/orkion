@@ -364,4 +364,61 @@ describe("ManagerAgent", () => {
     expect(result.text).toBe("Commit creado: feat: agregar permisos persistentes. Push realizado: branch set up to track origin.");
     expect(calls).toBe(0);
   });
+
+  test("returns exact system execution summary without re-synthesizing with the provider", async () => {
+    let calls = 0;
+    const silentFactory: ProviderFactory = () => ({
+      name: "openrouter" as const,
+      capabilities: {
+        supportsTools: false,
+        supportsStructuredOutput: false
+      },
+      isConfigured() {
+        return true;
+      },
+      async generateText(): Promise<GenerateTextResult> {
+        calls += 1;
+        return { text: "should not be used for system summaries" };
+      },
+      async streamText(): Promise<GenerateTextResult> {
+        calls += 1;
+        return { text: "should not be used for system summaries" };
+      }
+    });
+
+    const systemWorker: SubAgent = {
+      name: "system",
+      canHandle() {
+        return true;
+      },
+      async execute(_task: TaskRequest, _plan: DelegationPlan, _context?: AgentExecutionContext): Promise<AgentTaskResult> {
+        return {
+          status: "success",
+          summary: "Directorio de trabajo: C:\\Users\\burge\\Documents\\orkion\n\nVerificacion:\nC:\\Users\\burge\\Documents\\orkion\\macos",
+          toolCalls: [],
+          errors: [],
+          confidence: "high",
+          sources: [],
+          queriesTried: [],
+          visitedUrls: [],
+          officialSourceFound: true,
+          reasoningSummary: "summary"
+        };
+      }
+    };
+
+    const registry = new ProviderRegistry(baseConfig, fakeCredentials, silentFactory);
+    const policy = new ModelPolicyResolver(baseConfig, registry);
+    const manager = new ManagerAgent(registry, policy, [systemWorker]);
+
+    const result = await manager.run({
+      id: "task-system-factual",
+      goal: "crea en el directorio actual una carpeta llamada macos"
+    });
+
+    expect(result.delegated).toBe(true);
+    expect(result.plan.intentType).toBe("system_operation");
+    expect(result.text).toContain("C:\\Users\\burge\\Documents\\orkion\\macos");
+    expect(calls).toBe(0);
+  });
 });

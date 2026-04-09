@@ -173,6 +173,10 @@ function shouldReturnExactWorkerSummary(task: TaskRequest, intent: ResearchInten
     return true;
   }
 
+  if (intent.type === "system_operation") {
+    return true;
+  }
+
   if (workerResult.data?.responseMode === "raw_http") {
     return true;
   }

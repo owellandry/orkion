@@ -6,6 +6,15 @@ import * as os from "node:os";
 
 const execAsync = promisify(exec);
 
+function buildShellCommand(command: string): string {
+  if (process.platform === "win32") {
+    const escaped = command.replace(/"/g, '`"');
+    return `powershell -NoProfile -Command "${escaped}"`;
+  }
+
+  return command;
+}
+
 export function createSystemMcpServer(): McpServer {
   const server = new McpServer({
     name: "orkion-system-mcp",
@@ -48,14 +57,16 @@ export function createSystemMcpServer(): McpServer {
       inputSchema: z.object(runCommandSchema)
     },
     async ({ command, cwd }: z.infer<z.ZodObject<typeof runCommandSchema>>) => {
+      const effectiveCwd = cwd || process.cwd();
       try {
-        const { stdout, stderr } = await execAsync(command, { cwd: cwd || process.cwd() });
+        const { stdout, stderr } = await execAsync(buildShellCommand(command), { cwd: effectiveCwd });
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify({
                 success: true,
+                cwd: effectiveCwd,
                 stdout: stdout.trim(),
                 stderr: stderr.trim()
               })
@@ -70,6 +81,7 @@ export function createSystemMcpServer(): McpServer {
               text: JSON.stringify({
                 success: false,
                 error: error.message,
+                cwd: effectiveCwd,
                 stdout: error.stdout?.toString().trim(),
                 stderr: error.stderr?.toString().trim()
               })
